@@ -1,0 +1,48 @@
+{
+  "investor": {
+    "name": "Ananya Sharma",
+    "pan": "ABCDE1234F",
+    "email": "ananya@example.com",
+    "mobile": "9876543210"
+  },
+  "statementDate": "2026-06-01",
+  "holdings": [
+    {
+      "folio": "123456/78",
+      "amc": "HDFC Mutual Fund",
+      "schemeName": "HDFC ELSS Tax Saver Growth",
+      "category": "ELSS",
+      "currentValue": 185000,
+      "costValue": 150000,
+      "units": 2100,
+      "sip": { "amount": 5000, "frequency": "Monthly" }
+    },
+    {
+      "folio": "998877/11",
+      "amc": "SBI Mutual Fund",
+      "schemeName": "SBI Small Cap Fund Growth",
+      "category": "Small Cap",
+      "currentValue": 21000,
+      "costValue": 18000,
+      "units": 100
+    },
+    {
+      "folio": "554433/20",
+      "amc": "ICICI Prudential Mutual Fund",
+      "schemeName": "ICICI Prudential Technology Fund Growth",
+      "category": "Sector/Thematic",
+      "currentValue": 94000,
+      "costValue": 80000,
+      "units": 460
+    },
+    {
+      "folio": "778899/31",
+      "amc": "HDFC Mutual Fund",
+      "schemeName": "HDFC Flexi Cap Fund Growth",
+      "category": "Flexi Cap",
+      "currentValue": 410000,
+      "costValue": 300000,
+      "units": 1900
+    }
+  ]
+}
