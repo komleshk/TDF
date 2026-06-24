@@ -128,10 +128,15 @@ function publicAppConfig() {
 }
 
 function mapReport(row) {
+  const portfolio = row.portfolio_json ? JSON.parse(row.portfolio_json) : undefined;
+  let analytics = row.analytics_json ? JSON.parse(row.analytics_json) : undefined;
+  if (portfolio?.holdings && !Array.isArray(analytics?.holdingReturns)) {
+    analytics = buildAnalytics(portfolio.holdings, getSettings(), row.statement_date || portfolio.statementDate);
+  }
   return {
     ...row,
-    portfolio: row.portfolio_json ? JSON.parse(row.portfolio_json) : undefined,
-    analytics: row.analytics_json ? JSON.parse(row.analytics_json) : undefined,
+    portfolio,
+    analytics,
     swp: row.swp_json ? JSON.parse(row.swp_json) : null,
     portfolio_json: undefined,
     analytics_json: undefined,
@@ -355,7 +360,7 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
     }
 
     const settings = getSettings();
-    const analytics = buildAnalytics(parsed.holdings, settings);
+    const analytics = buildAnalytics(parsed.holdings, settings, parsed.statementDate);
     const createReport = () => {
       if (newClient) {
         const clientResult = db()

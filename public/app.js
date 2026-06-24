@@ -375,13 +375,14 @@ async function reportPage(id) {
 function renderReport() {
   const { report, recommendations, internalNotes } = state.currentReport;
   const gainClass = report.analytics.absoluteGain >= 0 ? "positive" : "negative";
+  const returnMeasure = report.analytics.xirr == null ? "Unavailable" : `${report.analytics.xirr.toFixed(2)}%`;
   document.querySelector("#view").innerHTML = `<div class="page">
     ${pageHeader(`${report.client_name}'s portfolio`, `${report.source} CAS · reviewed ${date(report.created_at)}`, `<a class="button secondary" href="/api/reports/${report.id}/excel">↓ Excel</a><a class="button gold" href="/api/reports/${report.id}/pdf">↓ Client PDF</a>`)}
     <div class="report-summary">
       ${stat("Current value", money.format(report.analytics.totalValue), "₹")}
       ${stat("Invested cost", money.format(report.analytics.totalCost), "◫")}
       ${stat("Absolute gain/loss", `<span class="${gainClass}">${money.format(report.analytics.absoluteGain)}</span>`, "↗").replaceAll("&lt;", "<").replaceAll("&gt;", ">")}
-      ${stat("Holdings", report.portfolio.holdings.length, "▤")}
+      ${stat("Portfolio XIRR", returnMeasure, "↗")}
     </div>
     <div class="report-tabs">
       ${[["overview", "Overview"], ["holdings", "Holdings"], ["recommendations", "Recommendations"], ["plan", "Proposed plan"], ["notes", "Internal notes"]].map(([key, label]) => `<button class="report-tab ${state.reportTab === key ? "active" : ""}" data-report-tab="${key}">${label}</button>`).join("")}
@@ -446,8 +447,14 @@ function overviewContent(report) {
 }
 
 function holdingsContent(report) {
-  return `<section class="panel"><div class="table-wrap"><table><thead><tr><th>Scheme</th><th>Folio</th><th>Asset class</th><th>Category</th><th class="text-right">Units</th><th class="text-right">NAV</th><th class="text-right">Cost</th><th class="text-right">Current value</th><th class="text-right">Gain/loss</th></tr></thead><tbody>
-    ${report.portfolio.holdings.map((item) => `<tr><td><strong>${esc(item.schemeName)}</strong><br><span class="muted small">${esc(item.amc)}</span></td><td>${esc(item.folio || "—")}</td><td><span class="badge">${esc(item.assetClass)}</span></td><td>${esc(item.category)}</td><td class="text-right money">${item.units.toLocaleString("en-IN", { maximumFractionDigits: 4 })}</td><td class="text-right money">${money.format(item.nav)}</td><td class="text-right money">${money.format(item.costValue)}</td><td class="text-right money"><strong>${money.format(item.currentValue)}</strong></td><td class="text-right money ${item.absoluteGain >= 0 ? "positive" : "negative"}">${money.format(item.absoluteGain)}</td></tr>`).join("")}
+  const returns = Object.fromEntries((report.analytics.holdingReturns || []).map((item) => [item.key, item]));
+  const percent = (value) => value == null ? "—" : `${Number(value).toFixed(2)}%`;
+  return `<section class="panel"><div class="panel-header"><div><h3>Portfolio holdings and investor returns</h3><span class="muted small">XIRR uses dated investor cash flows. CAGR is shown only for a single-investment holding; “—” means the CAS did not provide enough transaction history.</span></div></div><div class="table-wrap"><table><thead><tr><th>Scheme</th><th>Folio</th><th>Asset class</th><th>Category</th><th class="text-right">Allocation</th><th class="text-right">Cost</th><th class="text-right">Current value</th><th class="text-right">Gain/loss</th><th class="text-right">XIRR</th><th class="text-right">CAGR</th><th>Since</th></tr></thead><tbody>
+    ${report.portfolio.holdings.map((item) => {
+      const itemReturn = returns[item.key] || {};
+      const allocation = report.analytics.totalValue ? (item.currentValue / report.analytics.totalValue) * 100 : 0;
+      return `<tr><td><strong>${esc(item.schemeName)}</strong><br><span class="muted small">${esc(item.amc)}</span></td><td>${esc(item.folio || "—")}</td><td><span class="badge">${esc(item.assetClass)}</span></td><td>${esc(item.category)}</td><td class="text-right money">${allocation.toFixed(1)}%</td><td class="text-right money">${money.format(item.costValue)}</td><td class="text-right money"><strong>${money.format(item.currentValue)}</strong></td><td class="text-right money ${item.absoluteGain >= 0 ? "positive" : "negative"}">${money.format(item.absoluteGain)}</td><td class="text-right money">${percent(itemReturn.xirr)}</td><td class="text-right money">${percent(itemReturn.cagr)}</td><td>${itemReturn.firstInvestmentDate ? date(itemReturn.firstInvestmentDate) : "—"}</td></tr>`;
+    }).join("")}
   </tbody></table></div></section>`;
 }
 

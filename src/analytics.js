@@ -15,7 +15,8 @@ export function xirr(transactions) {
   const cashflows = transactions
     .filter((tx) => tx.date && Number.isFinite(Number(tx.amount)))
     .map((tx) => ({ date: new Date(tx.date), amount: Number(tx.amount) }))
-    .filter((tx) => !Number.isNaN(tx.date.valueOf()));
+    .filter((tx) => !Number.isNaN(tx.date.valueOf()))
+    .sort((a, b) => a.date - b.date);
   if (cashflows.length < 2 || !cashflows.some((tx) => tx.amount < 0) || !cashflows.some((tx) => tx.amount > 0)) return null;
   const origin = cashflows[0].date;
   const valueAt = (rate) =>
@@ -34,7 +35,67 @@ export function xirr(transactions) {
   return Number.isFinite(result) ? result * 100 : null;
 }
 
-export function buildAnalytics(holdings, settings = {}) {
+function datedCashflows(transactions = []) {
+  return transactions
+    .filter((tx) => tx.date && Number.isFinite(Number(tx.amount)) && Number(tx.amount) !== 0)
+    .map((tx) => ({ date: new Date(tx.date), amount: Number(tx.amount) }))
+    .filter((tx) => !Number.isNaN(tx.date.valueOf()))
+    .sort((a, b) => a.date - b.date);
+}
+
+function returnCashflows(holding, statementDate) {
+  const flows = datedCashflows(holding.transactions);
+  if (!flows.length || !holding.currentValue) return flows;
+  const valuationDate = new Date(statementDate || Date.now());
+  if (Number.isNaN(valuationDate.valueOf())) return flows;
+  const sameDayTerminal = flows.some(
+    (flow) =>
+      flow.amount > 0 &&
+      flow.date.toISOString().slice(0, 10) === valuationDate.toISOString().slice(0, 10) &&
+      Math.abs(flow.amount - holding.currentValue) < 0.01,
+  );
+  if (!sameDayTerminal) flows.push({ date: valuationDate, amount: holding.currentValue });
+  return flows.sort((a, b) => a.date - b.date);
+}
+
+function cagrForHolding(holding, statementDate) {
+  const flows = datedCashflows(holding.transactions);
+  const purchases = flows.filter((flow) => flow.amount < 0);
+  const valuationDate = new Date(statementDate || Date.now());
+  const otherPositiveFlows = flows.filter(
+    (flow) =>
+      flow.amount > 0 &&
+      !(
+        !Number.isNaN(valuationDate.valueOf()) &&
+        flow.date.toISOString().slice(0, 10) === valuationDate.toISOString().slice(0, 10) &&
+        Math.abs(flow.amount - holding.currentValue) < 0.01
+      ),
+  );
+  if (purchases.length !== 1 || otherPositiveFlows.length || !holding.currentValue) return null;
+  const end = new Date(statementDate || Date.now());
+  const years = (end - purchases[0].date) / 86_400_000 / 365;
+  if (!Number.isFinite(years) || years <= 0) return null;
+  const invested = Math.abs(purchases[0].amount);
+  if (!invested) return null;
+  const result = ((holding.currentValue / invested) ** (1 / years) - 1) * 100;
+  return Number.isFinite(result) ? result : null;
+}
+
+function holdingReturn(holding, statementDate) {
+  const sourceFlows = datedCashflows(holding.transactions);
+  const flows = returnCashflows(holding, statementDate);
+  const firstInvestmentDate = sourceFlows.find((flow) => flow.amount < 0)?.date;
+  return {
+    key: holding.key,
+    xirr: xirr(flows),
+    cagr: cagrForHolding(holding, statementDate),
+    firstInvestmentDate: firstInvestmentDate ? firstInvestmentDate.toISOString().slice(0, 10) : null,
+    cashflowCount: sourceFlows.length,
+    status: sourceFlows.some((flow) => flow.amount < 0) ? "calculated" : "missing-cashflows",
+  };
+}
+
+export function buildAnalytics(holdings, settings = {}, statementDate = null) {
   const totalValue = holdings.reduce((sum, item) => sum + item.currentValue, 0);
   const totalCost = holdings.reduce((sum, item) => sum + item.costValue, 0);
   const byAssetClass = groupByValue(holdings, "assetClass");
@@ -47,14 +108,16 @@ export function buildAnalytics(holdings, settings = {}) {
     counts[holding.category] = (counts[holding.category] || 0) + 1;
     return counts;
   }, {});
-  const allTransactions = holdings.flatMap((holding) => holding.transactions || []);
+  const holdingReturns = holdings.map((holding) => holdingReturn(holding, statementDate));
+  const portfolioTransactions = holdings.flatMap((holding) => returnCashflows(holding, statementDate));
 
   return {
     totalValue,
     totalCost,
     absoluteGain: totalValue - totalCost,
     gainPercent: totalCost ? ((totalValue - totalCost) / totalCost) * 100 : 0,
-    xirr: xirr(allTransactions),
+    xirr: xirr(portfolioTransactions),
+    holdingReturns,
     byAssetClass,
     byAmc,
     byCategory,

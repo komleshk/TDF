@@ -79,12 +79,35 @@ test("analytics calculate totals, allocations and XIRR", () => {
     isElss: index === 0,
     transactions: item.transactions || []
   }));
-  const analytics = buildAnalytics(holdings);
+  const analytics = buildAnalytics(holdings, {}, fixture.statementDate);
   assert.equal(analytics.totalValue, 206000);
   assert.equal(analytics.absoluteGain, 38000);
   assert.equal(analytics.smallHoldings.length, 1);
   assert.ok(analytics.xirr > 0);
+  assert.equal(analytics.holdingReturns.length, 2);
+  assert.ok(analytics.holdingReturns[0].xirr > 0);
+  assert.ok(analytics.holdingReturns[0].cagr > 0);
+  assert.equal(analytics.holdingReturns[1].xirr, null);
+  assert.equal(analytics.holdingReturns[1].status, "missing-cashflows");
   assert.ok(xirr([{ date: "2020-01-01", amount: -100 }, { date: "2021-01-01", amount: 110 }]) > 9);
+});
+
+test("CAGR is withheld for multiple investments while XIRR remains available", () => {
+  const analytics = buildAnalytics([{
+    key: "sip",
+    schemeName: "Example SIP Fund",
+    category: "Equity",
+    assetClass: "Equity",
+    amc: "Example",
+    currentValue: 130000,
+    costValue: 120000,
+    transactions: [
+      { date: "2025-01-01", amount: -60000 },
+      { date: "2025-07-01", amount: -60000 },
+    ],
+  }], {}, "2026-01-01");
+  assert.ok(analytics.holdingReturns[0].xirr > 0);
+  assert.equal(analytics.holdingReturns[0].cagr, null);
 });
 
 test("recommendation rules flag ELSS SIP and small holdings", () => {

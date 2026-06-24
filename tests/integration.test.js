@@ -41,6 +41,7 @@ function createPdf() {
     const chunks = [];
     const payload = {
       investor: { name: "Test Client", pan: "ABCDE1234F" },
+      statementDate: "2026-06-01",
       holdings: [{
         folio: "10001",
         amc: "HDFC Mutual Fund",
@@ -48,7 +49,8 @@ function createPdf() {
         category: "Flexi Cap",
         currentValue: 125000,
         costValue: 100000,
-        units: 1000
+        units: 1000,
+        transactions: [{ date: "2023-06-01", amount: -100000 }]
       }]
     };
     const doc = new PDFDocument({ userPassword: "secret123", ownerPassword: "owner-secret" });
@@ -101,6 +103,8 @@ test("authentication, client creation, protected upload and exports work end-to-
   assert.equal(response.status, 200);
   const review = await response.json();
   assert.equal(review.report.portfolio.holdings.length, 1);
+  assert.ok(review.report.analytics.xirr > 0);
+  assert.ok(review.report.analytics.holdingReturns[0].cagr > 0);
   assert.equal(review.recommendations.length, 1);
 
   response = await request(`/api/reports/${reportId}/recommendations`, {

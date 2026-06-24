@@ -43,7 +43,7 @@ export async function seedSample() {
         const clientResult = db()
           .prepare("INSERT INTO clients (name,pan,email,mobile,risk_profile,created_by) VALUES (?,?,?,?,?,?)")
           .run(fixture.investor.name, fixture.investor.pan, fixture.investor.email, fixture.investor.mobile, "Moderate", admin.id);
-        const analytics = buildAnalytics(fixture.holdings, getSettings());
+        const analytics = buildAnalytics(fixture.holdings, getSettings(), fixture.statementDate);
         const reportResult = db()
           .prepare("INSERT INTO reports (client_id,source,statement_date,portfolio_json,analytics_json,created_by) VALUES (?,?,?,?,?,?)")
           .run(clientResult.lastInsertRowid, fixture.source, fixture.statementDate, JSON.stringify(fixture), JSON.stringify(analytics), admin.id);

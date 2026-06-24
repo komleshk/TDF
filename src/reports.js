@@ -4,9 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { db, getSettings } from "./db.js";
 import { loadEnv } from "./config.js";
+import { buildAnalytics } from "./analytics.js";
 
 const inr = (value) => `Rs. ${Math.round(Number(value) || 0).toLocaleString("en-IN")}`;
 const pct = (value) => `${Number(value || 0).toFixed(1)}%`;
+const returnPct = (value) => value == null ? "—" : `${Number(value).toFixed(2)}%`;
 const reportConfig = loadEnv();
 
 function loadReport(reportId) {
@@ -19,6 +21,9 @@ function loadReport(reportId) {
   if (!report) return null;
   report.portfolio = JSON.parse(report.portfolio_json);
   report.analytics = JSON.parse(report.analytics_json);
+  if (!Array.isArray(report.analytics.holdingReturns)) {
+    report.analytics = buildAnalytics(report.portfolio.holdings, getSettings(), report.statement_date || report.portfolio.statementDate);
+  }
   report.recommendations = db().prepare("SELECT * FROM recommendations WHERE report_id=? ORDER BY id").all(reportId);
   report.notes = db().prepare("SELECT * FROM internal_notes WHERE report_id=?").get(reportId) || {};
   report.model = report.model_portfolio_id
@@ -86,7 +91,8 @@ export function streamPdfReport(reportId, response, { includeInternal = false } 
   doc.text(`Current value: ${inr(report.analytics.totalValue)}`, 48, 90);
   doc.text(`Invested cost: ${inr(report.analytics.totalCost)}`, 48, 110);
   doc.text(`Absolute gain/loss: ${inr(report.analytics.absoluteGain)} (${pct(report.analytics.gainPercent)})`, 48, 130);
-  doc.text(`Risk profile: ${report.risk_profile}`, 48, 150);
+  doc.text(`Portfolio XIRR: ${returnPct(report.analytics.xirr)}`, 48, 150);
+  doc.text(`Risk profile: ${report.risk_profile}`, 48, 170);
   let y = 195;
   doc.fillColor("#15375b").fontSize(14).font("Helvetica-Bold").text("Asset allocation", 48, y);
   y += 28;
@@ -110,6 +116,44 @@ export function streamPdfReport(reportId, response, { includeInternal = false } 
   for (const observation of observations) {
     doc.fillColor("#334155").fontSize(10).font("Helvetica").text(`• ${observation}`, 58, y, { width: 475 });
     y += 30;
+  }
+
+  doc.addPage();
+  doc.fillColor("#15375b").fontSize(18).font("Helvetica-Bold").text("Portfolio holdings and investor returns");
+  doc.fillColor("#64748b").fontSize(8).font("Helvetica").text(
+    "XIRR uses dated investor cash flows plus the statement-date market value. CAGR is shown only for a single-investment holding. A dash means transaction history was insufficient.",
+    48,
+    78,
+    { width: 500 },
+  );
+  y = 112;
+  const holdingColumns = [
+    { label: "Scheme", x: 48, width: 142 },
+    { label: "Category", x: 194, width: 72 },
+    { label: "Alloc.", x: 270, width: 42 },
+    { label: "Cost", x: 316, width: 62 },
+    { label: "Value", x: 382, width: 62 },
+    { label: "XIRR", x: 448, width: 45 },
+    { label: "CAGR", x: 497, width: 48 },
+  ];
+  y = pdfTableHeader(doc, y, holdingColumns);
+  const holdingReturns = Object.fromEntries((report.analytics.holdingReturns || []).map((item) => [item.key, item]));
+  for (const holding of report.portfolio.holdings) {
+    y = ensurePage(doc, y, 42);
+    if (y === 48) y = pdfTableHeader(doc, y, holdingColumns);
+    const itemReturn = holdingReturns[holding.key] || {};
+    const allocation = report.analytics.totalValue ? (holding.currentValue / report.analytics.totalValue) * 100 : 0;
+    const rowHeight = Math.max(34, doc.heightOfString(holding.schemeName, { width: 142 }) + 12);
+    doc.fillColor("#1e293b").fontSize(7.5).font("Helvetica");
+    doc.text(holding.schemeName, 48, y + 6, { width: 142 });
+    doc.text(holding.category, 194, y + 6, { width: 72 });
+    doc.text(pct(allocation), 270, y + 6, { width: 42, align: "right" });
+    doc.text(inr(holding.costValue), 316, y + 6, { width: 62, align: "right" });
+    doc.text(inr(holding.currentValue), 382, y + 6, { width: 62, align: "right" });
+    doc.text(returnPct(itemReturn.xirr), 448, y + 6, { width: 45, align: "right" });
+    doc.text(returnPct(itemReturn.cagr), 497, y + 6, { width: 48, align: "right" });
+    doc.moveTo(48, y + rowHeight).lineTo(548, y + rowHeight).strokeColor("#e2e8f0").stroke();
+    y += rowHeight;
   }
 
   doc.addPage();
@@ -216,13 +260,37 @@ export async function writeExcelReport(reportId, response) {
     ["Cost value", report.analytics.totalCost],
     ["Absolute gain/loss", report.analytics.absoluteGain],
     ["Gain/loss %", report.analytics.gainPercent / 100],
+    ["Portfolio XIRR", report.analytics.xirr == null ? "Unavailable — dated cash flows required" : report.analytics.xirr / 100],
   ]);
-  summary.getColumn(2).numFmt = "₹#,##0.00";
+  ["B4", "B5", "B6"].forEach((cell) => { summary.getCell(cell).numFmt = "₹#,##0.00"; });
+  ["B7", "B8"].forEach((cell) => { summary.getCell(cell).numFmt = "0.00%"; });
   styleSheet(summary);
 
   const holdings = workbook.addWorksheet("Fund-wise Holding");
-  holdings.addRow(["Folio", "AMC", "Scheme", "Asset Class", "Category", "Option", "Units", "NAV", "Cost", "Current Value", "Gain/Loss"]);
-  report.portfolio.holdings.forEach((item) => holdings.addRow([item.folio, item.amc, item.schemeName, item.assetClass, item.category, item.option, item.units, item.nav, item.costValue, item.currentValue, item.absoluteGain]));
+  holdings.addRow(["Folio", "AMC", "Scheme", "Asset Class", "Category", "Option", "Units", "NAV", "Cost", "Current Value", "Gain/Loss", "Allocation %", "XIRR", "CAGR", "Return Since", "Cash-flow Status"]);
+  const holdingReturnMap = Object.fromEntries((report.analytics.holdingReturns || []).map((item) => [item.key, item]));
+  report.portfolio.holdings.forEach((item) => {
+    const itemReturn = holdingReturnMap[item.key] || {};
+    holdings.addRow([
+      item.folio,
+      item.amc,
+      item.schemeName,
+      item.assetClass,
+      item.category,
+      item.option,
+      item.units,
+      item.nav,
+      item.costValue,
+      item.currentValue,
+      item.absoluteGain,
+      report.analytics.totalValue ? item.currentValue / report.analytics.totalValue : 0,
+      itemReturn.xirr == null ? "Unavailable" : itemReturn.xirr / 100,
+      itemReturn.cagr == null ? "Not applicable" : itemReturn.cagr / 100,
+      itemReturn.firstInvestmentDate || "",
+      itemReturn.status === "calculated" ? "Calculated from dated transactions" : "Dated transactions missing",
+    ]);
+  });
+  ["L", "M", "N"].forEach((column) => { holdings.getColumn(column).numFmt = "0.00%"; });
   styleSheet(holdings);
 
   const recommendations = workbook.addWorksheet("Recommendation");
