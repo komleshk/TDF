@@ -49,10 +49,22 @@ function extractInvestorName(text) {
     new RegExp(String.raw`\b((?:Mr|Mrs|Ms|Miss)\.?\s+[A-Za-z][A-Za-z .'\-]{1,80}?)\s+PAN\s*:`, "i"),
   ];
   for (const pattern of patterns) {
-    const name = plausibleInvestorName(compact.match(pattern)?.[1]);
-    if (name) return name;
+    const matches = [...compact.matchAll(new RegExp(pattern.source, `${pattern.flags}g`))];
+    for (const match of matches.reverse()) {
+      const name = plausibleInvestorName(match[1]);
+      if (name) return name;
+    }
   }
   return "";
+}
+
+function extractInvestorPan(text) {
+  const pans = [...String(text || "").matchAll(/\b[A-Z]{5}[0-9]{4}[A-Z]\b/g)].map((match) => match[0]);
+  return pans.at(-1) || "";
+}
+
+function accountKey(investor, index) {
+  return investor.pan || investor.name.toLowerCase() || `account-${index}`;
 }
 
 function lastMutualFundName(text) {
@@ -104,12 +116,32 @@ function parseSchemeBlock(text, header, end) {
     folio,
     amc: lastMutualFundName(prefix),
     schemeName,
+    investor: {
+      name: extractInvestorName(prefix),
+      pan: extractInvestorPan(prefix),
+    },
     currentValue,
     costValue,
     units,
     nav: valuation ? amount(valuation[2]) : 0,
     transactions: parseTransactions(block),
   };
+}
+
+function groupedAccounts(holdings, fallbackInvestor, statementDate, warnings) {
+  const groups = new Map();
+  holdings.forEach((holding, index) => {
+    const investor = {
+      name: holding.investor?.name || fallbackInvestor.name || "",
+      pan: holding.investor?.pan || fallbackInvestor.pan || "",
+      email: holding.investor?.email || fallbackInvestor.email || "",
+      mobile: holding.investor?.mobile || fallbackInvestor.mobile || "",
+    };
+    const key = accountKey(investor, index);
+    if (!groups.has(key)) groups.set(key, { investor, statementDate, holdings: [], warnings });
+    groups.get(key).holdings.push(holding);
+  });
+  return [...groups.values()].filter((account) => account.holdings.length);
 }
 
 export class CamsAdapter extends GenericCasAdapter {
@@ -153,16 +185,20 @@ export class CamsAdapter extends GenericCasAdapter {
 
     const statementDate = toIsoDate(text.match(/\bTo\s+(\d{2}-[A-Za-z]{3}-\d{4})\b/i)?.[1]);
 
+    const investor = {
+      name: extractInvestorName(text),
+      pan: text.match(/\b[A-Z]{5}[0-9]{4}[A-Z]\b/)?.[0] || "",
+      email: text.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0] || "",
+      mobile: text.match(/(?:\+91[-\s]?)?[6-9]\d{9}/)?.[0] || "",
+    };
+    const accounts = groupedAccounts(holdings, investor, statementDate, warnings);
+
     return this.normalize({
       source: this.name,
       statementDate,
-      investor: {
-        name: extractInvestorName(text),
-        pan: text.match(/\b[A-Z]{5}[0-9]{4}[A-Z]\b/)?.[0] || "",
-        email: text.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0] || "",
-        mobile: text.match(/(?:\+91[-\s]?)?[6-9]\d{9}/)?.[0] || "",
-      },
+      investor,
       holdings,
+      accounts: accounts.length > 1 ? accounts : [],
       warnings,
     });
   }

@@ -215,6 +215,61 @@ test("CAS upload can create a new client instead of requiring an existing select
   assert.equal(clientPayload.client.pan, "FGHIJ5678K");
 });
 
+test("family CAS upload creates separate client reports", async () => {
+  const accounts = [
+    {
+      investor: { name: "Family One", pan: "PQRST1234U" },
+      statementDate: "2026-06-01",
+      holdings: [{
+        folio: "20001",
+        amc: "HDFC Mutual Fund",
+        schemeName: "HDFC Balanced Advantage Fund Growth",
+        currentValue: 150000,
+        costValue: 120000,
+        units: 1000,
+        transactions: [{ date: "2024-01-01", amount: -120000 }],
+      }],
+    },
+    {
+      investor: { name: "Family Two", pan: "VWXYZ5678A" },
+      statementDate: "2026-06-01",
+      holdings: [{
+        folio: "30001",
+        amc: "SBI Mutual Fund",
+        schemeName: "SBI Large & Midcap Fund Growth",
+        currentValue: 250000,
+        costValue: 200000,
+        units: 2000,
+        transactions: [{ date: "2024-02-01", amount: -200000 }],
+      }],
+    },
+  ];
+  const form = new FormData();
+  form.set("familyMode", "1");
+  form.set("newClientName", "Family");
+  form.set("newClientRiskProfile", "Moderate");
+  form.set("password", "secret123");
+  form.set(
+    "cas",
+    new Blob([await createPdf({ accounts, holdings: accounts.flatMap((account) => account.holdings), investor: { name: "Family", pan: "ABCDE1234F" } })], { type: "application/pdf" }),
+    "family-cas.pdf",
+  );
+
+  const response = await request("/api/cas/upload", { method: "POST", body: form });
+  const payload = await response.json();
+  assert.equal(response.status, 201, payload.error);
+  assert.equal(payload.familyReports.length, 2);
+  assert.equal(payload.familyReports[0].clientName, "Family One");
+  assert.equal(payload.familyReports[1].pan, "VWXYZ5678A");
+
+  const firstReport = await (await request(`/api/reports/${payload.familyReports[0].reportId}`)).json();
+  const secondReport = await (await request(`/api/reports/${payload.familyReports[1].reportId}`)).json();
+  assert.equal(firstReport.report.client_name, "Family One");
+  assert.equal(firstReport.report.portfolio.holdings.length, 1);
+  assert.equal(secondReport.report.client_name, "Family Two");
+  assert.equal(secondReport.report.portfolio.holdings[0].currentValue, 250000);
+});
+
 test("new client CAS upload gives clear instruction when client name is missing", async () => {
   const form = new FormData();
   form.set("clientId", "__new__");

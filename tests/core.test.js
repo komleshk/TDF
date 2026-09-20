@@ -110,6 +110,30 @@ test("CAMS parser reads client name from unit holder and salutation formats", ()
   assert.equal(parseCasText(`CAMSCASWS Dear Ms. Kavita Rao, ${baseHolding}`).investor.name, "Kavita Rao");
 });
 
+test("CAMS family text is split into separate investor accounts", () => {
+  const parsed = parseCasText(`
+    CAMSCASWS- Version:V Live- Consolidated Account Statement-Jan- To-Jun
+    Investor Name: Raj Shah PAN: ABCDE1234F
+    HDFC Mutual Fund PAN: ABCDE1234F Folio No.: 111111/11
+    PAN: OK INF179K01AB1 - HDFC Flexi Cap Fund Growth (Non-Demat) - ISIN: INF179K01AB1
+    01-Jan-2024 100,000.00 100.0000 1000.000 Purchase
+    Closing Unit Balance: 1000.000 Total Cost Value: 100,000.00
+    NAV on 30-Jun-2026: INR 125.0000 Market Value on 30-Jun-2026: INR 125,000.00
+    Unit Holder Name: Meera Shah PAN: FGHIJ5678K
+    SBI Mutual Fund PAN: FGHIJ5678K Folio No.: 222222/22
+    PAN: OK INF200K01XY2 - SBI Bluechip Fund Growth (Non-Demat) - ISIN: INF200K01XY2
+    01-Feb-2024 200,000.00 200.0000 1000.000 Purchase
+    Closing Unit Balance: 1000.000 Total Cost Value: 200,000.00
+    NAV on 30-Jun-2026: INR 240.0000 Market Value on 30-Jun-2026: INR 240,000.00
+  `);
+  assert.equal(parsed.accounts.length, 2);
+  assert.equal(parsed.accounts[0].investor.name, "Raj Shah");
+  assert.equal(parsed.accounts[0].investor.pan, "ABCDE1234F");
+  assert.equal(parsed.accounts[1].investor.name, "Meera Shah");
+  assert.equal(parsed.accounts[1].investor.pan, "FGHIJ5678K");
+  assert.equal(parsed.accounts[1].holdings[0].currentValue, 240000);
+});
+
 test("CAMS extraction rejects page-sized generic rows instead of creating a corrupt report", () => {
   assert.throws(
     () =>

@@ -298,6 +298,7 @@ async function uploadPage(query = "") {
     <form id="uploadForm" class="upload-layout">
       <section class="panel"><div class="panel-body form-stack">
         <label class="field"><span>Who is this CAS for? *</span><select name="clientId" id="uploadClient" required><option value="">Select an option</option><option value="__new__" ${selectedClient ? "" : "selected"}>＋ Create a new client from this CAS</option>${clients.map((client) => `<option value="${client.id}" ${String(client.id) === selectedClient ? "selected" : ""}>${esc(client.name)}${client.pan ? ` · ${esc(client.pan)}` : ""}</option>`).join("")}</select></label>
+        <label class="check-row"><input type="checkbox" name="familyMode" value="1" id="familyMode" /><span><strong>Family CAS</strong><small>Create separate reports for each family member detected in this CAS.</small></span></label>
         <div class="form-grid" id="newClientFields">
           <label class="field"><span>New client name *</span><input name="newClientName" minlength="2" placeholder="Type client name if creating a new client" /></label>
           <label class="field"><span>PAN <small>(optional override)</small></span><input name="newClientPan" maxlength="10" autocapitalize="characters" placeholder="Read from CAS when available" /></label>
@@ -329,12 +330,16 @@ async function uploadPage(query = "") {
   const clientSelect = document.querySelector("#uploadClient");
   const newClientFields = document.querySelector("#newClientFields");
   const newClientName = document.querySelector('input[name="newClientName"]');
+  const familyMode = document.querySelector("#familyMode");
   const syncClientMode = () => {
+    if (familyMode.checked) clientSelect.value = "__new__";
     const isNew = clientSelect.value === "__new__";
     newClientFields.classList.toggle("hidden", !isNew);
     newClientName.required = isNew;
+    clientSelect.disabled = familyMode.checked;
   };
   clientSelect.addEventListener("change", syncClientMode);
+  familyMode.addEventListener("change", syncClientMode);
   syncClientMode();
   const showFile = (file) => {
     state.selectedFile = file;
@@ -357,7 +362,11 @@ async function uploadPage(query = "") {
     buttonBusy(button, true, "Reading and analysing CAS…");
     try {
       const result = await api("/api/cas/upload", { method: "POST", body: new FormData(event.currentTarget) });
-      notify(`CAS processed using the ${result.source} adapter.`);
+      if (result.familyReports?.length) {
+        notify(`Family CAS processed: ${result.familyReports.length} reports created.`);
+      } else {
+        notify(`CAS processed using the ${result.source} adapter.`);
+      }
       location.hash = `#/reports/${result.reportId}`;
     } catch (error) {
       document.querySelector("#uploadError").textContent = error.message;

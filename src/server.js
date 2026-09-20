@@ -17,7 +17,7 @@ import { streamPdfReport, writeExcelReport } from "./reports.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot;
 const config = loadEnv();
-const appRevision = "cams-parser-v5";
+const appRevision = "cams-family-v6";
 initDb(config);
 
 const brandingPath = path.join(config.storagePath, "branding");
@@ -324,6 +324,77 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
   try {
     const parsed = await parseCasPdf(request.file.path, String(request.body.password || ""), { maxPages: config.maxCasPages });
     if (!parsed.holdings.length) return response.status(422).json({ error: "No holdings were found in this CAS." });
+    const settings = getSettings();
+    const createReportForClient = (targetClient, portfolio) => {
+      const analytics = buildAnalytics(portfolio.holdings, settings, portfolio.statementDate);
+      const reportResult = db()
+        .prepare("INSERT INTO reports (client_id,source,statement_date,portfolio_json,analytics_json,created_by) VALUES (?,?,?,?,?,?)")
+        .run(targetClient.id, portfolio.source || parsed.source, portfolio.statementDate, JSON.stringify(portfolio), JSON.stringify(analytics), request.user.id);
+      const reportId = Number(reportResult.lastInsertRowid);
+      const insertRecommendation = db().prepare(
+        `INSERT INTO recommendations
+        (report_id,holding_key,system_action,system_reason,final_action,client_note,internal_note,updated_by)
+        VALUES (?,?,?,?,?,?,?,?)`,
+      );
+      for (const item of buildRecommendations(portfolio.holdings, settings)) {
+        insertRecommendation.run(reportId, item.holdingKey, item.systemAction, item.systemReason, item.finalAction, item.clientNote, item.internalNote, request.user.id);
+      }
+      db().prepare("INSERT INTO internal_notes (report_id,updated_by) VALUES (?,?)").run(reportId, request.user.id);
+      return reportId;
+    };
+
+    if (request.body.familyMode === "1") {
+      const accounts = (parsed.accounts || []).filter((account) => account.holdings?.length);
+      if (accounts.length < 2) {
+        return response.status(422).json({ error: "Family mode is on, but the CAS did not expose more than one investor clearly. Upload individual CAS files or use normal upload for this file." });
+      }
+      const familyName = String(request.body.newClientName || "").trim();
+      const riskProfile = String(request.body.newClientRiskProfile || "Moderate");
+      if (!validRiskProfile(riskProfile)) return response.status(400).json({ error: "Choose a valid risk profile." });
+      const familyReports = transaction(() =>
+        accounts.map((account, index) => {
+          const accountInvestor = account.investor || {};
+          const memberName = String(accountInvestor.name || (familyName ? `${familyName} - Member ${index + 1}` : "")).trim();
+          const memberPan = String(accountInvestor.pan || "").trim().toUpperCase();
+          if (memberName.length < 2) {
+            const error = new Error("Family CAS found a member without a readable name. Enter a family name/prefix and upload again, or upload that member separately.");
+            error.status = 400;
+            throw error;
+          }
+          if (!memberPan || !validPan(memberPan)) {
+            const error = new Error(`${memberName}'s PAN was not readable or valid. Upload that member separately or correct the CAS source.`);
+            error.status = 400;
+            throw error;
+          }
+          let familyClient = db().prepare("SELECT * FROM clients WHERE pan=?").get(memberPan);
+          if (!familyClient) {
+            const clientResult = db()
+              .prepare("INSERT INTO clients (name,pan,email,mobile,risk_profile,created_by) VALUES (?,?,?,?,?,?)")
+              .run(memberName, memberPan, accountInvestor.email || null, String(accountInvestor.mobile || "").replace(/\D/g, "") || null, riskProfile, request.user.id);
+            familyClient = { id: Number(clientResult.lastInsertRowid), name: memberName, pan: memberPan };
+            audit(request.user.id, "create_from_family_cas", "client", familyClient.id);
+          }
+          const portfolio = {
+            source: parsed.source,
+            investor: accountInvestor,
+            statementDate: account.statementDate || parsed.statementDate,
+            holdings: account.holdings,
+            warnings: account.warnings || parsed.warnings || [],
+          };
+          const reportId = createReportForClient(familyClient, portfolio);
+          audit(request.user.id, "upload_family_member", "report", reportId, { source: parsed.source, holdings: account.holdings.length, clientId: familyClient.id });
+          return { reportId, clientId: familyClient.id, clientName: familyClient.name, pan: familyClient.pan };
+        }),
+      );
+      return response.status(201).json({
+        reportId: familyReports[0]?.reportId,
+        clientId: familyReports[0]?.clientId,
+        familyReports,
+        source: parsed.source,
+        warnings: parsed.warnings,
+      });
+    }
+
     const createNewClient = request.body.clientId === "__new__" || !request.body.clientId;
     let client = createNewClient
       ? null
@@ -360,8 +431,6 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
       }
     }
 
-    const settings = getSettings();
-    const analytics = buildAnalytics(parsed.holdings, settings, parsed.statementDate);
     const createReport = () => {
       if (newClient) {
         const clientResult = db()
@@ -377,26 +446,13 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
         client = { id: Number(clientResult.lastInsertRowid), ...newClient };
         audit(request.user.id, "create_from_cas", "client", client.id);
       }
-      const reportResult = db()
-        .prepare("INSERT INTO reports (client_id,source,statement_date,portfolio_json,analytics_json,created_by) VALUES (?,?,?,?,?,?)")
-        .run(client.id, parsed.source, parsed.statementDate, JSON.stringify(parsed), JSON.stringify(analytics), request.user.id);
-      const reportId = Number(reportResult.lastInsertRowid);
-      const insertRecommendation = db().prepare(
-        `INSERT INTO recommendations
-        (report_id,holding_key,system_action,system_reason,final_action,client_note,internal_note,updated_by)
-        VALUES (?,?,?,?,?,?,?,?)`,
-      );
-      for (const item of buildRecommendations(parsed.holdings, settings)) {
-        insertRecommendation.run(reportId, item.holdingKey, item.systemAction, item.systemReason, item.finalAction, item.clientNote, item.internalNote, request.user.id);
-      }
-      db().prepare("INSERT INTO internal_notes (report_id,updated_by) VALUES (?,?)").run(reportId, request.user.id);
-      return reportId;
+      return createReportForClient(client, parsed);
     };
     const reportId = transaction(createReport);
     audit(request.user.id, "upload_and_parse", "report", reportId, { source: parsed.source, holdings: parsed.holdings.length });
     response.status(201).json({ reportId, clientId: client.id, source: parsed.source, warnings: parsed.warnings });
   } catch (error) {
-    response.status(error.code === "PDF_PASSWORD" ? 400 : 422).json({ error: error.message || "CAS processing failed." });
+    response.status(error.status || (error.code === "PDF_PASSWORD" ? 400 : 422)).json({ error: error.message || "CAS processing failed." });
   } finally {
     await fsp.rm(request.file.path, { force: true });
   }

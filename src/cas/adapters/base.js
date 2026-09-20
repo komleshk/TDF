@@ -14,7 +14,7 @@ export class CasAdapter {
   }
 
   normalize(result) {
-    return {
+    const normalized = {
       source: this.name,
       investor: {
         name: result.investor?.name || "",
@@ -26,5 +26,22 @@ export class CasAdapter {
       holdings: (result.holdings || []).map(normalizeHolding),
       warnings: result.warnings || [],
     };
+    if (Array.isArray(result.accounts)) {
+      normalized.accounts = result.accounts
+        .map((account) => ({
+          source: this.name,
+          investor: {
+            name: account.investor?.name || "",
+            pan: account.investor?.pan || "",
+            email: account.investor?.email || "",
+            mobile: account.investor?.mobile || "",
+          },
+          statementDate: account.statementDate || result.statementDate || null,
+          holdings: (account.holdings || []).map(normalizeHolding),
+          warnings: [...(result.warnings || []), ...(account.warnings || [])],
+        }))
+        .filter((account) => account.holdings.length);
+    }
+    return normalized;
   }
 }
