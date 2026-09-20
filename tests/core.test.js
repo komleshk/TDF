@@ -7,7 +7,7 @@ import PDFDocument from "pdfkit";
 import { buildAnalytics, xirr } from "../src/analytics.js";
 import { recommendationFor } from "../src/recommendations.js";
 import { buildSwpProjection } from "../src/swp.js";
-import { parseCasPdf } from "../src/cas/parser.js";
+import { parseCasPdf, parseCasText } from "../src/cas/parser.js";
 import { validateConfig } from "../src/config.js";
 
 const fixture = {
@@ -68,6 +68,45 @@ test("password protected CAS is rejected without password and parsed with passwo
   assert.equal(parsed.holdings.length, 2);
   assert.equal(parsed.holdings[0].isElss, true);
   fs.rmSync(file, { force: true });
+});
+
+test("detailed CAMS text is parsed by scheme blocks with validated totals", () => {
+  const parsed = parseCasText(`
+    CAMSCASWS- Version:V Live- Consolidated Account Statement-Jan- To-Jun
+    Email: ananya@example.com Mobile: 9876543210 PAN: ABCDE1234F
+    Period From 01-Jan-2026 To 30-Jun-2026
+    HDFC Mutual Fund PAN: ABCDE1234F Folio No.: 123456/78
+    PAN: OK INF179K01AB1 - HDFC ELSS Tax Saver Growth (Non-Demat) - ISIN: INF179K01AB1
+    01-Jan-2024 150,000.00 71.4286 2100.000 Purchase
+    Closing Unit Balance: 2100.000 Total Cost Value: 150,000.00
+    NAV on 30-Jun-2026: INR 88.0952 Market Value on 30-Jun-2026: INR 185,000.00
+    SBI Mutual Fund PAN: ABCDE1234F Folio No.: 998877/11
+    PAN: OK INF200K01XY2 - SBI Small Cap Fund Growth (Non-Demat) - ISIN: INF200K01XY2
+    15-Feb-2025 18,000.00 180.0000 100.000 Purchase
+    Closing Unit Balance: 100.000 Total Cost Value: 18,000.00
+    NAV on 30-Jun-2026: INR 210.0000 Market Value on 30-Jun-2026: INR 21,000.00
+    Total 168,000.00 206,000.00 Date Amount Price Units Transaction
+  `);
+  assert.equal(parsed.source, "CAMS");
+  assert.equal(parsed.statementDate, "2026-06-30");
+  assert.equal(parsed.investor.pan, "ABCDE1234F");
+  assert.equal(parsed.holdings.length, 2);
+  assert.equal(parsed.holdings[0].amc, "HDFC Mutual Fund");
+  assert.equal(parsed.holdings[0].schemeName, "HDFC ELSS Tax Saver Growth");
+  assert.equal(parsed.holdings[0].currentValue, 185000);
+  assert.equal(parsed.holdings[0].costValue, 150000);
+  assert.equal(parsed.holdings[0].transactions[0].amount, -150000);
+});
+
+test("CAMS extraction rejects page-sized generic rows instead of creating a corrupt report", () => {
+  assert.throws(
+    () =>
+      parseCasText(`
+        CAMSCASWS- Version:V Live- Consolidated Account Statement-Jan- To-Jun HDFC Mutual Fund SBI Mutual Fund
+        CAMSCASWS huge PDF page text CAMS Mutual Fund Growth Plan 1,612,405,939,695,488,300 3,812,851.28
+      `),
+    /could not be read safely/i,
+  );
 });
 
 test("analytics calculate totals, allocations and XIRR", () => {

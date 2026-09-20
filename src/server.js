@@ -17,6 +17,7 @@ import { streamPdfReport, writeExcelReport } from "./reports.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot;
 const config = loadEnv();
+const appRevision = "cams-parser-v2";
 initDb(config);
 
 const brandingPath = path.join(config.storagePath, "branding");
@@ -147,7 +148,7 @@ function mapReport(row) {
 app.get("/healthz", (_request, response) => {
   try {
     db().prepare("SELECT 1 ok").get();
-    response.json({ status: "ok" });
+    response.json({ status: "ok", revision: appRevision });
   } catch {
     response.status(503).json({ status: "unavailable" });
   }
@@ -157,7 +158,7 @@ app.get("/readyz", (_request, response) => {
   try {
     const health = checkDb();
     const ready = health.integrity.every((value) => value === "ok") && health.foreignKeys.length === 0;
-    response.status(ready ? 200 : 503).json({ status: ready ? "ready" : "invalid", migrations: health.migrations.map((row) => row.version) });
+    response.status(ready ? 200 : 503).json({ status: ready ? "ready" : "invalid", revision: appRevision, migrations: health.migrations.map((row) => row.version) });
   } catch {
     response.status(503).json({ status: "unavailable" });
   }
