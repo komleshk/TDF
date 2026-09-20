@@ -109,6 +109,21 @@ test("CAMS extraction rejects page-sized generic rows instead of creating a corr
   );
 });
 
+test("CAMS summary mismatch is warned but does not block valid scheme holdings", () => {
+  const parsed = parseCasText(`
+    CAMSCASWS- Version:V Live- Consolidated Account Statement-Jan- To-Jun
+    HDFC Mutual Fund PAN: ABCDE1234F Folio No.: 123456/78
+    PAN: OK INF179K01AB1 - HDFC ELSS Tax Saver Growth (Non-Demat) - ISIN: INF179K01AB1
+    01-Jan-2024 150,000.00 71.4286 2100.000 Purchase
+    Closing Unit Balance: 2100.000 Total Cost Value: 150,000.00
+    NAV on 30-Jun-2026: INR 88.0952 Market Value on 30-Jun-2026: INR 185,000.00
+    Total 168,000.00 206,000.00 Date Amount Price Units Transaction
+  `);
+  assert.equal(parsed.holdings.length, 1);
+  assert.equal(parsed.holdings[0].currentValue, 185000);
+  assert.match(parsed.warnings.join(" "), /summary totals differ/i);
+});
+
 test("analytics calculate totals, allocations and XIRR", () => {
   const holdings = fixture.holdings.map((item, index) => ({
     ...item,

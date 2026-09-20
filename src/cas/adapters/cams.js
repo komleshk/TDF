@@ -110,6 +110,10 @@ export class CamsAdapter extends GenericCasAdapter {
       throw new Error("This CAMS statement layout could not be read safely. No report was created. Please upload a detailed CAMS CAS with valuation and transaction pages.");
     }
 
+    const warnings = holdings.some((holding) => !holding.transactions.length)
+      ? ["Some holdings did not include readable transaction rows, so CAGR/XIRR may be unavailable for those schemes."]
+      : [];
+
     const summary = text.match(new RegExp(String.raw`Total\s+(${money})\s+(${money})\s+Date\s+Amount\s+Price\s+Units\s+Transaction`, "i"));
     if (summary) {
       const expectedCost = amount(summary[1]);
@@ -119,14 +123,11 @@ export class CamsAdapter extends GenericCasAdapter {
       const costDiff = expectedCost ? Math.abs(parsedCost - expectedCost) / expectedCost : 0;
       const valueDiff = expectedValue ? Math.abs(parsedValue - expectedValue) / expectedValue : 0;
       if (costDiff > 0.02 || valueDiff > 0.02) {
-        throw new Error("The CAMS totals did not match the extracted holdings, so the report was stopped to prevent incorrect figures. Please use a freshly generated detailed CAS.");
+        warnings.push("CAMS summary totals differ from the scheme-wise values read from the CAS. Please verify the totals before sharing the report.");
       }
     }
 
     const statementDate = toIsoDate(text.match(/\bTo\s+(\d{2}-[A-Za-z]{3}-\d{4})\b/i)?.[1]);
-    const warnings = holdings.some((holding) => !holding.transactions.length)
-      ? ["Some holdings did not include readable transaction rows, so CAGR/XIRR may be unavailable for those schemes."]
-      : [];
 
     return this.normalize({
       source: this.name,

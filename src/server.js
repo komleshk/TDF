@@ -17,7 +17,7 @@ import { streamPdfReport, writeExcelReport } from "./reports.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot;
 const config = loadEnv();
-const appRevision = "cams-parser-v2";
+const appRevision = "cams-parser-v3";
 initDb(config);
 
 const brandingPath = path.join(config.storagePath, "branding");
