@@ -31,6 +31,30 @@ function cleanSpaces(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function plausibleInvestorName(value) {
+  const cleaned = cleanSpaces(value).replace(/^(?:Mr|Mrs|Ms|Miss|M\/s)\.?\s+/i, "");
+  if (cleaned.length < 2 || cleaned.length > 80) return "";
+  if (/[0-9@]/.test(cleaned)) return "";
+  if (cleaned.split(/\s+/).length > 6) return "";
+  if (/mutual fund|statement|account|folio|transaction|scheme|nominee|address|email|mobile|amount|price|units|date|cams|kfin|password/i.test(cleaned)) return "";
+  return cleaned;
+}
+
+function extractInvestorName(text) {
+  const compact = cleanSpaces(text);
+  const boundary = String.raw`(?=\s+(?:PAN|Email|E-mail|Mobile|Address|Folio|Statement|CAS|KYC|Nominee|Joint|Mode|Tax|Bank|Scheme)\b|[,|/]|$)`;
+  const patterns = [
+    new RegExp(String.raw`(?:Investor\s+Name|Unit\s+Holder\s+Name|Name\s+of\s+(?:Sole\s*/\s*)?First\s+Unit\s+Holder|Name\s+of\s+the\s+Investor|Name)\s*:?\s*((?:Mr|Mrs|Ms|Miss|M/s)?\.?\s*[A-Za-z][A-Za-z .'\-]{1,80}?)${boundary}`, "i"),
+    new RegExp(String.raw`Dear\s+((?:Mr|Mrs|Ms|Miss)?\.?\s*[A-Za-z][A-Za-z .'\-]{1,80}?)(?:,|\s+PAN\b)`, "i"),
+    new RegExp(String.raw`\b((?:Mr|Mrs|Ms|Miss)\.?\s+[A-Za-z][A-Za-z .'\-]{1,80}?)\s+PAN\s*:`, "i"),
+  ];
+  for (const pattern of patterns) {
+    const name = plausibleInvestorName(compact.match(pattern)?.[1]);
+    if (name) return name;
+  }
+  return "";
+}
+
 function lastMutualFundName(text) {
   const matches = [...text.matchAll(/([A-Z][A-Za-z&.\-\s]+Mutual Fund)\s+PAN:/gi)];
   return cleanSpaces(matches.at(-1)?.[1] || "Unknown AMC");
@@ -133,6 +157,7 @@ export class CamsAdapter extends GenericCasAdapter {
       source: this.name,
       statementDate,
       investor: {
+        name: extractInvestorName(text),
         pan: text.match(/\b[A-Z]{5}[0-9]{4}[A-Z]\b/)?.[0] || "",
         email: text.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0] || "",
         mobile: text.match(/(?:\+91[-\s]?)?[6-9]\d{9}/)?.[0] || "",

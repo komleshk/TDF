@@ -73,7 +73,7 @@ test("password protected CAS is rejected without password and parsed with passwo
 test("detailed CAMS text is parsed by scheme blocks with validated totals", () => {
   const parsed = parseCasText(`
     CAMSCASWS- Version:V Live- Consolidated Account Statement-Jan- To-Jun
-    Email: ananya@example.com Mobile: 9876543210 PAN: ABCDE1234F
+    Investor Name: Ananya Sharma PAN: ABCDE1234F Email: ananya@example.com Mobile: 9876543210
     Period From 01-Jan-2026 To 30-Jun-2026
     HDFC Mutual Fund PAN: ABCDE1234F Folio No.: 123456/78
     PAN: OK INF179K01AB1 - HDFC ELSS Tax Saver Growth (Non-Demat) - ISIN: INF179K01AB1
@@ -89,6 +89,7 @@ test("detailed CAMS text is parsed by scheme blocks with validated totals", () =
   `);
   assert.equal(parsed.source, "CAMS");
   assert.equal(parsed.statementDate, "2026-06-30");
+  assert.equal(parsed.investor.name, "Ananya Sharma");
   assert.equal(parsed.investor.pan, "ABCDE1234F");
   assert.equal(parsed.holdings.length, 2);
   assert.equal(parsed.holdings[0].amc, "HDFC Mutual Fund");
@@ -96,6 +97,17 @@ test("detailed CAMS text is parsed by scheme blocks with validated totals", () =
   assert.equal(parsed.holdings[0].currentValue, 185000);
   assert.equal(parsed.holdings[0].costValue, 150000);
   assert.equal(parsed.holdings[0].transactions[0].amount, -150000);
+});
+
+test("CAMS parser reads client name from unit holder and salutation formats", () => {
+  const baseHolding = `
+    HDFC Mutual Fund PAN: ABCDE1234F Folio No.: 123456/78
+    PAN: OK INF179K01AB1 - HDFC ELSS Tax Saver Growth (Non-Demat) - ISIN: INF179K01AB1
+    Closing Unit Balance: 2100.000 Total Cost Value: 150,000.00
+    NAV on 30-Jun-2026: INR 88.0952 Market Value on 30-Jun-2026: INR 185,000.00
+  `;
+  assert.equal(parseCasText(`CAMSCASWS Unit Holder Name : Poonam Mutreja PAN: ABCDE1234F ${baseHolding}`).investor.name, "Poonam Mutreja");
+  assert.equal(parseCasText(`CAMSCASWS Dear Ms. Kavita Rao, ${baseHolding}`).investor.name, "Kavita Rao");
 });
 
 test("CAMS extraction rejects page-sized generic rows instead of creating a corrupt report", () => {
