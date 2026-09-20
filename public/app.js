@@ -299,7 +299,7 @@ async function uploadPage(query = "") {
       <section class="panel"><div class="panel-body form-stack">
         <label class="field"><span>Who is this CAS for? *</span><select name="clientId" id="uploadClient" required><option value="">Select an option</option><option value="__new__" ${selectedClient ? "" : "selected"}>＋ Create a new client from this CAS</option>${clients.map((client) => `<option value="${client.id}" ${String(client.id) === selectedClient ? "selected" : ""}>${esc(client.name)}${client.pan ? ` · ${esc(client.pan)}` : ""}</option>`).join("")}</select></label>
         <div class="form-grid" id="newClientFields">
-          <label class="field"><span>New client name <small>(optional override)</small></span><input name="newClientName" minlength="2" placeholder="Read from CAS when available" /></label>
+          <label class="field"><span>New client name *</span><input name="newClientName" minlength="2" placeholder="Type client name if creating a new client" /></label>
           <label class="field"><span>PAN <small>(optional override)</small></span><input name="newClientPan" maxlength="10" autocapitalize="characters" placeholder="Read from CAS when available" /></label>
           <label class="field"><span>Mobile <small>(optional)</small></span><input name="newClientMobile" inputmode="tel" /></label>
           <label class="field"><span>Email <small>(optional)</small></span><input name="newClientEmail" type="email" /></label>
@@ -328,9 +328,11 @@ async function uploadPage(query = "") {
   const dropzone = document.querySelector("#dropzone");
   const clientSelect = document.querySelector("#uploadClient");
   const newClientFields = document.querySelector("#newClientFields");
+  const newClientName = document.querySelector('input[name="newClientName"]');
   const syncClientMode = () => {
     const isNew = clientSelect.value === "__new__";
     newClientFields.classList.toggle("hidden", !isNew);
+    newClientName.required = isNew;
   };
   clientSelect.addEventListener("change", syncClientMode);
   syncClientMode();

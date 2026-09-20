@@ -17,7 +17,7 @@ import { streamPdfReport, writeExcelReport } from "./reports.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot;
 const config = loadEnv();
-const appRevision = "cams-parser-v4";
+const appRevision = "cams-parser-v5";
 initDb(config);
 
 const brandingPath = path.join(config.storagePath, "branding");
@@ -340,7 +340,7 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
         }
       : null;
     if (newClient && newClient.name.length < 2) {
-      return response.status(400).json({ error: "Enter the new client's name because it could not be read reliably from this CAS." });
+      return response.status(400).json({ error: "Type the client's name in the New client name field, then upload the CAS again." });
     }
     if (newClient && !validPan(newClient.pan)) {
       return response.status(400).json({ error: "The new client PAN is not valid. Correct it and try again." });

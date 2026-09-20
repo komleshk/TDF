@@ -36,7 +36,7 @@ async function request(url, options = {}) {
   return response;
 }
 
-function createPdf() {
+function createPdf(overrides = {}) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     const payload = {
@@ -53,12 +53,18 @@ function createPdf() {
         transactions: [{ date: "2023-06-01", amount: -100000 }]
       }]
     };
+    const finalPayload = {
+      ...payload,
+      ...overrides,
+      investor: { ...payload.investor, ...(overrides.investor || {}) },
+      holdings: overrides.holdings || payload.holdings,
+    };
     const doc = new PDFDocument({ userPassword: "secret123", ownerPassword: "owner-secret" });
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
     doc.fontSize(12).text("CAMS Consolidated Account Statement");
-    doc.fontSize(5).text(`AGM-CAS-JSON:${Buffer.from(JSON.stringify(payload)).toString("base64url")} END-AGM-CAS`, { width: 500 });
+    doc.fontSize(5).text(`AGM-CAS-JSON:${Buffer.from(JSON.stringify(finalPayload)).toString("base64url")} END-AGM-CAS`, { width: 500 });
     doc.end();
   });
 }
@@ -207,6 +213,19 @@ test("CAS upload can create a new client instead of requiring an existing select
   const clientPayload = await clientResponse.json();
   assert.equal(clientPayload.client.name, "New CAS Client");
   assert.equal(clientPayload.client.pan, "FGHIJ5678K");
+});
+
+test("new client CAS upload gives clear instruction when client name is missing", async () => {
+  const form = new FormData();
+  form.set("clientId", "__new__");
+  form.set("newClientRiskProfile", "Moderate");
+  form.set("password", "secret123");
+  form.set("cas", new Blob([await createPdf({ investor: { name: "", pan: "KLMNO1234P" } })], { type: "application/pdf" }), "missing-name-cas.pdf");
+
+  const response = await request("/api/cas/upload", { method: "POST", body: form });
+  const payload = await response.json();
+  assert.equal(response.status, 400);
+  assert.match(payload.error, /New client name field/i);
 });
 
 test("expired sessions are rejected using real timestamp comparison", async () => {
