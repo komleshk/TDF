@@ -37,6 +37,41 @@ function loadReport(reportId) {
   return report;
 }
 
+function normalizedPersonName(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function familyMembersFromReports(reports) {
+  const members = new Map();
+  reports.forEach((report, index) => {
+    const key = normalizedPersonName(report.client_name) || report.pan || `member-${index + 1}`;
+    if (!members.has(key)) {
+      members.set(key, {
+        clientName: report.client_name,
+        pan: report.pan || "",
+        source: report.source,
+        holdings: [],
+        reports: [],
+        analytics: { totalValue: 0, totalCost: 0, absoluteGain: 0, gainPercent: 0, xirr: null },
+      });
+    }
+    const member = members.get(key);
+    member.reports.push(report);
+    member.holdings.push(...(report.portfolio.holdings || []));
+    if (!member.pan && report.pan) member.pan = report.pan;
+    member.analytics.totalValue += report.analytics.totalValue || 0;
+    member.analytics.totalCost += report.analytics.totalCost || 0;
+    member.analytics.absoluteGain += report.analytics.absoluteGain || 0;
+  });
+  return [...members.values()].map((member) => ({
+    ...member,
+    analytics: {
+      ...member.analytics,
+      gainPercent: member.analytics.totalCost ? (member.analytics.absoluteGain / member.analytics.totalCost) * 100 : 0,
+    },
+  }));
+}
+
 function pdfTableHeader(doc, y, columns) {
   doc.save().rect(48, y, 500, 24).fill("#15375b").fillColor("#fff").fontSize(8);
   columns.forEach((column) => doc.text(column.label, column.x, y + 8, { width: column.width }));
@@ -241,18 +276,19 @@ export function streamFamilyPdfReport(familyBatchId, response) {
     .all(familyBatchId);
   const reports = rows.map((row) => loadReport(row.id)).filter(Boolean);
   if (!reports.length) throw new Error("Family report batch not found");
+  const members = familyMembersFromReports(reports);
   const settings = getSettings();
   const doc = new PDFDocument({ margin: 48, size: "A4", info: { Title: "Family Portfolio Review", Author: settings.companyName } });
   doc.pipe(response);
 
-  const familyValue = reports.reduce((sum, report) => sum + report.analytics.totalValue, 0);
-  const familyCost = reports.reduce((sum, report) => sum + report.analytics.totalCost, 0);
+  const familyValue = members.reduce((sum, member) => sum + member.analytics.totalValue, 0);
+  const familyCost = members.reduce((sum, member) => sum + member.analytics.totalCost, 0);
   doc.rect(0, 0, 595, 842).fill("#f8fafc");
   doc.rect(0, 0, 595, 16).fill("#c59742");
   doc.fillColor("#15375b").fontSize(30).font("Helvetica-Bold").text(settings.companyName, 48, 90);
   doc.fontSize(13).font("Helvetica").fillColor("#64748b").text("Family Portfolio Review", 48, 135);
   doc.moveTo(48, 175).lineTo(547, 175).strokeColor("#d7dee8").stroke();
-  doc.fillColor("#15375b").fontSize(18).font("Helvetica-Bold").text(`${reports.length} family members`, 48, 220);
+  doc.fillColor("#15375b").fontSize(18).font("Helvetica-Bold").text(`${members.length} family members`, 48, 220);
   doc.fillColor("#334155").fontSize(11).font("Helvetica");
   doc.text(`Combined current value: ${inr(familyValue)}`, 48, 255);
   doc.text(`Combined invested cost: ${inr(familyCost)}`, 48, 275);
@@ -267,26 +303,26 @@ export function streamFamilyPdfReport(familyBatchId, response) {
     { label: "Value", x: 426, width: 80 },
     { label: "Gain", x: 510, width: 38 },
   ]);
-  for (const report of reports) {
+  for (const member of members) {
     doc.fillColor("#1e293b").fontSize(8.5).font("Helvetica");
-    doc.text(report.client_name, 48, y + 6, { width: 190 });
-    doc.text(report.pan || "—", 242, y + 6, { width: 95 });
-    doc.text(inr(report.analytics.totalCost), 342, y + 6, { width: 80, align: "right" });
-    doc.text(inr(report.analytics.totalValue), 426, y + 6, { width: 80, align: "right" });
-    doc.text(pct(report.analytics.gainPercent), 510, y + 6, { width: 38, align: "right" });
+    doc.text(member.clientName, 48, y + 6, { width: 190 });
+    doc.text(member.pan || "—", 242, y + 6, { width: 95 });
+    doc.text(inr(member.analytics.totalCost), 342, y + 6, { width: 80, align: "right" });
+    doc.text(inr(member.analytics.totalValue), 426, y + 6, { width: 80, align: "right" });
+    doc.text(pct(member.analytics.gainPercent), 510, y + 6, { width: 38, align: "right" });
     doc.moveTo(48, y + 25).lineTo(548, y + 25).strokeColor("#e2e8f0").stroke();
     y += 25;
   }
 
-  for (const report of reports) {
+  for (const member of members) {
     doc.addPage();
-    doc.fillColor("#15375b").fontSize(18).font("Helvetica-Bold").text(report.client_name);
-    doc.fillColor("#64748b").fontSize(9).font("Helvetica").text(`${report.source} CAS${report.pan ? ` · PAN ${report.pan}` : ""}`, 48, 74);
+    doc.fillColor("#15375b").fontSize(18).font("Helvetica-Bold").text(member.clientName);
+    doc.fillColor("#64748b").fontSize(9).font("Helvetica").text(`${member.source} CAS${member.pan ? ` · PAN ${member.pan}` : ""}`, 48, 74);
     doc.fillColor("#334155").fontSize(10);
-    doc.text(`Current value: ${inr(report.analytics.totalValue)}`, 48, 105);
-    doc.text(`Invested cost: ${inr(report.analytics.totalCost)}`, 48, 123);
-    doc.text(`Gain/loss: ${inr(report.analytics.absoluteGain)} (${pct(report.analytics.gainPercent)})`, 48, 141);
-    doc.text(`Portfolio XIRR: ${returnPct(report.analytics.xirr)}`, 48, 159);
+    doc.text(`Current value: ${inr(member.analytics.totalValue)}`, 48, 105);
+    doc.text(`Invested cost: ${inr(member.analytics.totalCost)}`, 48, 123);
+    doc.text(`Gain/loss: ${inr(member.analytics.absoluteGain)} (${pct(member.analytics.gainPercent)})`, 48, 141);
+    doc.text(`Portfolio XIRR: ${returnPct(member.analytics.xirr)}`, 48, 159);
 
     y = 195;
     y = pdfTableHeader(doc, y, [
@@ -296,11 +332,11 @@ export function streamFamilyPdfReport(familyBatchId, response) {
       { label: "Value", x: 380, width: 70 },
       { label: "Gain", x: 454, width: 70 },
     ]);
-    for (const holding of report.portfolio.holdings) {
+    for (const holding of member.holdings) {
       const rowHeight = Math.max(30, doc.heightOfString(holding.schemeName, { width: 180 }) + 12);
       y = ensurePage(doc, y, rowHeight + 8);
       if (y === 48) {
-        doc.fillColor("#15375b").fontSize(18).font("Helvetica-Bold").text(`${report.client_name} holdings`);
+        doc.fillColor("#15375b").fontSize(18).font("Helvetica-Bold").text(`${member.clientName} holdings`);
         y = pdfTableHeader(doc, 82, [
           { label: "Scheme", x: 48, width: 180 },
           { label: "Folio", x: 232, width: 70 },

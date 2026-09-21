@@ -17,7 +17,7 @@ import { streamFamilyPdfReport, streamPdfReport, writeExcelReport } from "./repo
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot;
 const config = loadEnv();
-const appRevision = "cams-family-v9";
+const appRevision = "cams-family-v10";
 initDb(config);
 
 const brandingPath = path.join(config.storagePath, "branding");
@@ -118,6 +118,10 @@ function validEmail(value) {
 
 function validRiskProfile(value) {
   return ["Conservative", "Moderate", "Aggressive"].includes(value);
+}
+
+function normalizedPersonName(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function publicAppConfig() {
@@ -352,8 +356,28 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
       const riskProfile = String(request.body.newClientRiskProfile || "Moderate");
       const familyBatchId = token(10);
       if (!validRiskProfile(riskProfile)) return response.status(400).json({ error: "Choose a valid risk profile." });
+      const mergedAccounts = [...accounts.reduce((groups, account, index) => {
+        const accountInvestor = account.investor || {};
+        const memberName = String(accountInvestor.name || (familyName ? `${familyName} - Member ${index + 1}` : "")).trim();
+        const memberPan = String(accountInvestor.pan || "").trim().toUpperCase();
+        const key = normalizedPersonName(memberName) || (memberPan ? `pan:${memberPan}` : `member-${index + 1}`);
+        if (!groups.has(key)) {
+          groups.set(key, {
+            ...account,
+            investor: { ...accountInvestor, name: memberName, pan: memberPan },
+            holdings: [],
+            warnings: [],
+          });
+        }
+        const grouped = groups.get(key);
+        grouped.holdings.push(...(account.holdings || []));
+        grouped.warnings.push(...(account.warnings || []));
+        if (!grouped.investor.pan && memberPan) grouped.investor.pan = memberPan;
+        return groups;
+      }, new Map()).values()];
+
       const familyReports = transaction(() =>
-        accounts.map((account, index) => {
+        mergedAccounts.map((account, index) => {
           const accountInvestor = account.investor || {};
           const memberName = String(accountInvestor.name || (familyName ? `${familyName} - Member ${index + 1}` : "")).trim();
           const memberPan = String(accountInvestor.pan || "").trim().toUpperCase();

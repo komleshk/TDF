@@ -231,6 +231,19 @@ test("family CAS upload creates separate client reports", async () => {
       }],
     },
     {
+      investor: { name: "Family One", pan: "PQRST1234U" },
+      statementDate: "2026-06-01",
+      holdings: [{
+        folio: "20002",
+        amc: "ICICI Prudential Mutual Fund",
+        schemeName: "ICICI Prudential Silver ETF Fund of Fund Growth",
+        currentValue: 50000,
+        costValue: 40000,
+        units: 500,
+        transactions: [{ date: "2024-03-01", amount: -40000 }],
+      }],
+    },
+    {
       investor: { name: "Family Two", pan: "VWXYZ5678A" },
       statementDate: "2026-06-01",
       holdings: [{
@@ -268,7 +281,8 @@ test("family CAS upload creates separate client reports", async () => {
   const secondReport = await (await request(`/api/reports/${payload.familyReports[1].reportId}`)).json();
   assert.equal(firstReport.report.client_name, "Family One");
   assert.equal(firstReport.report.family_batch_id, payload.familyBatchId);
-  assert.equal(firstReport.report.portfolio.holdings.length, 1);
+  assert.equal(firstReport.report.portfolio.holdings.length, 2);
+  assert.equal(firstReport.report.analytics.totalValue, 200000);
   assert.equal(secondReport.report.client_name, "Family Two");
   assert.equal(secondReport.report.portfolio.holdings[0].currentValue, 250000);
 
