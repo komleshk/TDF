@@ -17,7 +17,7 @@ import { streamFamilyPdfReport, streamPdfReport, writeExcelReport } from "./repo
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot;
 const config = loadEnv();
-const appRevision = "cams-family-v14";
+const appRevision = "cams-family-v15";
 initDb(config);
 
 const brandingPath = path.join(config.storagePath, "branding");
@@ -48,7 +48,7 @@ app.use(express.json({ limit: "1mb" }));
 
 const upload = multer({
   dest: config.uploadTmpPath,
-  limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1, fields: 20 },
+  limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1, fields: 80 },
   fileFilter(_request, file, callback) {
     const isPdf = file.mimetype === "application/pdf" && file.originalname.toLowerCase().endsWith(".pdf");
     callback(isPdf ? null : new Error("Only PDF files are accepted."), isPdf);
@@ -848,6 +848,9 @@ app.use((error, _request, response, _next) => {
   if (response.headersSent) return response.end();
   if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
     return response.status(413).json({ error: `File exceeds the ${config.maxUploadMb} MB limit.` });
+  }
+  if (error instanceof multer.MulterError && error.code === "LIMIT_FIELD_COUNT") {
+    return response.status(400).json({ error: "Too many form fields were submitted. Refresh the page and upload the CAS again." });
   }
   if (/Only PDF files|PNG, JPEG or WebP/.test(error.message || "")) {
     return response.status(400).json({ error: error.message });

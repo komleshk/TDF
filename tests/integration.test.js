@@ -348,6 +348,48 @@ test("family CAS keeps same detected name separate when PANs differ", async () =
   assert.deepEqual(payload.familyMembers.map((member) => member.pan), ["AAAAA1111A", "BBBBB2222B"]);
 });
 
+test("family CAS review supports seven family members", async () => {
+  const pans = ["AAAAA1111A", "BBBBB2222B", "CCCCC3333C", "DDDDD4444D", "EEEEE5555E", "FFFFF6666F", "GGGGG7777G"];
+  const accounts = pans.map((pan, index) => ({
+    investor: { name: `M${index + 1}`, pan },
+    holdings: [{
+      folio: `7${index + 1}`,
+      schemeName: `Fund ${index + 1}`,
+      currentValue: 100000 + index,
+      costValue: 90000,
+    }],
+  }));
+  const familyPdf = await createPdf({ accounts, holdings: accounts.flatMap((account) => account.holdings), investor: { name: "Family", pan: "" } });
+  const form = new FormData();
+  form.set("familyMode", "1");
+  form.set("newClientRiskProfile", "Moderate");
+  form.set("password", "secret123");
+  form.set("cas", new Blob([familyPdf], { type: "application/pdf" }), "seven-family-cas.pdf");
+
+  let response = await request("/api/cas/upload", { method: "POST", body: form });
+  let payload = await response.json();
+  assert.equal(response.status, 200, payload.error);
+  assert.equal(payload.familyReviewRequired, true);
+  assert.equal(payload.familyMembers.length, 7);
+
+  const confirmForm = new FormData();
+  confirmForm.set("familyMode", "1");
+  confirmForm.set("familyReviewed", "1");
+  confirmForm.set("familyMemberOverrides", JSON.stringify(payload.familyMembers.map((member) => ({ selector: member.selector, name: member.name, pan: member.pan }))));
+  confirmForm.set("newClientRiskProfile", "Moderate");
+  confirmForm.set("password", "secret123");
+  for (const member of payload.familyMembers) {
+    confirmForm.append("reviewName", member.name);
+    confirmForm.append("reviewPan", member.pan);
+  }
+  confirmForm.set("cas", new Blob([familyPdf], { type: "application/pdf" }), "seven-family-cas.pdf");
+
+  response = await request("/api/cas/upload", { method: "POST", body: confirmForm });
+  payload = await response.json();
+  assert.equal(response.status, 201, payload.error);
+  assert.equal(payload.familyReports.length, 7);
+});
+
 test("family CAS asks for mapping only after parsing unidentified holdings", async () => {
   const holdings = [
     {

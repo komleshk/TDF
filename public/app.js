@@ -383,8 +383,8 @@ async function uploadPage(query = "") {
     if (familyReviewPanel.classList.contains("hidden")) return;
     const rows = [...familyReviewPanel.querySelectorAll("[data-family-selector]")].map((row) => ({
       selector: row.dataset.familySelector,
-      name: row.querySelector('[name="reviewName"]').value.trim(),
-      pan: row.querySelector('[name="reviewPan"]').value.trim().toUpperCase(),
+      name: row.querySelector("[data-review-name]").value.trim(),
+      pan: row.querySelector("[data-review-pan]").value.trim().toUpperCase(),
     }));
     familyReviewed.value = "1";
     familyMemberOverrides.value = JSON.stringify(rows);
@@ -393,12 +393,12 @@ async function uploadPage(query = "") {
     familyReviewed.value = "";
     familyMemberOverrides.value = "";
     familyReviewPanel.classList.remove("hidden");
-    familyReviewPanel.innerHTML = `<section class="panel" style="margin-top:12px"><div class="panel-header"><div><h2>Review family members before creating reports</h2><span class="muted small">Correct the name/PAN here first. Reports will be created only after you click Create family reports.</span></div></div><div class="table-wrap"><table><thead><tr><th>Detected member</th><th>PAN</th><th>Folios</th><th class="text-right">Value</th></tr></thead><tbody>${members.map((member, index) => `<tr data-family-selector="${esc(member.selector)}"><td><label class="field"><span>Name ${index + 1}</span><input name="reviewName" value="${esc(member.name)}" placeholder="Enter correct family member name" required /></label><small class="muted">Sample folio: ${esc((member.sampleFolios || []).join(", ") || "—")}</small></td><td><label class="field"><span>PAN</span><input name="reviewPan" value="${esc(member.pan)}" maxlength="10" autocapitalize="characters" /></label></td><td>${esc(member.folioCount)} folio(s)<br><span class="muted small">${esc(member.holdingCount)} holding(s)</span></td><td class="money text-right">${money.format(member.currentValue || 0)}</td></tr>`).join("")}</tbody></table></div></section>`;
+    familyReviewPanel.innerHTML = `<section class="panel" style="margin-top:12px"><div class="panel-header"><div><h2>Review family members before creating reports</h2><span class="muted small">Correct the name/PAN here first. Reports will be created only after you click Create family reports.</span></div></div><div class="table-wrap"><table><thead><tr><th>Detected member</th><th>PAN</th><th>Folios</th><th class="text-right">Value</th></tr></thead><tbody>${members.map((member, index) => `<tr data-family-selector="${esc(member.selector)}"><td><label class="field"><span>Name ${index + 1}</span><input data-review-name value="${esc(member.name)}" placeholder="Enter correct family member name" required /></label><small class="muted">Sample folio: ${esc((member.sampleFolios || []).join(", ") || "—")}</small></td><td><label class="field"><span>PAN</span><input data-review-pan value="${esc(member.pan)}" maxlength="10" autocapitalize="characters" /></label></td><td>${esc(member.folioCount)} folio(s)<br><span class="muted small">${esc(member.holdingCount)} holding(s)</span></td><td class="money text-right">${money.format(member.currentValue || 0)}</td></tr>`).join("")}</tbody></table></div></section>`;
     document.querySelector("#uploadError").textContent = "Please review/correct the family member names, then click Create family reports.";
     const button = document.querySelector('#uploadForm button[type="submit"]');
     button.textContent = "Create family reports";
     button.dataset.label = "Create family reports";
-    familyReviewPanel.querySelector('input[name="reviewName"]')?.focus();
+    familyReviewPanel.querySelector("[data-review-name]")?.focus();
   };
   const showFamilyResult = (result) => {
     document.querySelector("#view").innerHTML = `<div class="page">
