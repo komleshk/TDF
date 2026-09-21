@@ -17,7 +17,7 @@ import { streamFamilyPdfReport, streamPdfReport, writeExcelReport } from "./repo
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot;
 const config = loadEnv();
-const appRevision = "cams-family-v10";
+const appRevision = "cams-family-v11";
 initDb(config);
 
 const brandingPath = path.join(config.storagePath, "branding");

@@ -152,6 +152,27 @@ test("CAMS spaced demat headers keep scheme name clean and read folio holder nam
   assert.equal(parsed.holdings[0].currentValue, 23773);
 });
 
+test("CAMS PAN-like folio holders become separate family members", () => {
+  const parsed = parseCasText(`
+    CAMSCASWS- Version:V Live- Consolidated Account Statement
+    Bandhan Mutual Fund PAN:
+    PAN: OK INF194K01524 - Bandhan Large & Mid Cap Fund - Regular Plan - Growth (Non - Demat) - ISIN: INF194K01524 Registrar : CAMS Folio No: 4009282 / 57 Ram Singh Ratkuria Nominee 1: Jaideep Singh Opening Unit Balance: 0.000
+    17-Jul-2023 9,999.50 83.119 120.303 Systematic Purchase
+    Closing Unit Balance: 120.303 Total Cost Value: 9,999.50
+    NAV on 11-Sep-2026: INR 100.0000 Market Value on 11-Sep-2026: INR 12,030.30
+    HDFC Mutual Fund PAN:
+    PAN: OK INF179K01AB1 - HDFC Balanced Advantage Fund Growth (Non - Demat) - ISIN: INF179K01AB1 Registrar : CAMS Folio No: 5000000 / 01 AABHG2653L Nominee 1: Opening Unit Balance: 0.000
+    01-Jan-2024 23,56,500.00 100.0000 23565.000 Purchase
+    Closing Unit Balance: 23565.000 Total Cost Value: 23,56,500.00
+    NAV on 11-Sep-2026: INR 123.9101 Market Value on 11-Sep-2026: INR 29,19,968.00
+  `);
+  assert.equal(parsed.accounts.length, 2);
+  assert.equal(parsed.accounts[0].investor.name, "Ram Singh Ratkuria");
+  assert.equal(parsed.accounts[1].investor.name, "AABHG2653L");
+  assert.equal(parsed.accounts[1].investor.pan, "AABHG2653L");
+  assert.equal(parsed.accounts[1].holdings[0].currentValue, 2919968);
+});
+
 test("CAMS extraction rejects page-sized generic rows instead of creating a corrupt report", () => {
   assert.throws(
     () =>

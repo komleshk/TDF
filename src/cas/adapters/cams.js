@@ -17,6 +17,7 @@ const monthMap = {
 };
 
 const money = String.raw`[\d,]+(?:\.\d+)?`;
+const panPattern = String.raw`[A-Z]{5}[0-9]{4}[A-Z]`;
 const dematMarker = String.raw`\(\s*(?:Non\s*[-–]?\s*)?Demat\s*\)\s*-\s*ISIN\s*:`;
 const schemeHeader = new RegExp(String.raw`PAN:\s*(?:OK\s+)?([A-Z0-9]+)\s*-\s*([\s\S]*?)\s+${dematMarker}\s*([A-Z0-9]+)`, "gi");
 
@@ -60,7 +61,7 @@ function extractInvestorName(text) {
 }
 
 function extractInvestorPan(text) {
-  const pans = [...String(text || "").matchAll(/\b[A-Z]{5}[0-9]{4}[A-Z]\b/g)].map((match) => match[0]);
+  const pans = [...String(text || "").matchAll(new RegExp(String.raw`\b${panPattern}\b`, "g"))].map((match) => match[0]);
   return pans.at(-1) || "";
 }
 
@@ -82,11 +83,14 @@ function lastMutualFundName(text) {
 
 function folioDetails(block) {
   const compact = cleanSpaces(block);
-  const match = compact.match(/\bFolio\s+No\.?:\s*([0-9][0-9\s/]{2,30})\s+([A-Za-z][A-Za-z .'\-]{1,80}?)(?=\s+(?:Nominee|Mode|Opening\s+Unit\s+Balance|\d{2}-[A-Za-z]{3}-\d{4}|CAMSCASWS|Date\s+Amount)|$)/i);
+  const match = compact.match(new RegExp(String.raw`\bFolio\s+No\.?:\s*([0-9][0-9\s/]{2,30})\s+(${panPattern}|[A-Za-z][A-Za-z .'\-]{1,80}?)(?:\s+PAN\s*:?\s*(${panPattern}))?(?=\s+(?:Nominee|Mode|Opening\s+Unit\s+Balance|\d{2}-[A-Za-z]{3}-\d{4}|CAMSCASWS|Date\s+Amount)|$)`, "i"));
   const fallbackFolio = compact.match(/\bFolio\s+No\.?:\s*([0-9][0-9\s/]{2,30})/i)?.[1] || compact.match(/\bFolio:\s*([0-9/]+)/i)?.[1] || "";
+  const holder = cleanSpaces(match?.[2] || "");
+  const holderPan = holder.match(new RegExp(String.raw`^${panPattern}$`, "i"))?.[0]?.toUpperCase() || match?.[3]?.toUpperCase() || "";
   return {
     folio: cleanSpaces(match?.[1] || fallbackFolio).replace(/\s*\/\s*/g, "/"),
-    name: plausibleInvestorName(match?.[2]),
+    name: holderPan || plausibleInvestorName(holder),
+    pan: holderPan,
   };
 }
 
@@ -136,7 +140,7 @@ function parseSchemeBlock(text, header, end) {
     schemeName,
     investor: {
       name: folio.name || extractInvestorName(prefix),
-      pan: extractInvestorPan(prefix),
+      pan: folio.pan || extractInvestorPan(prefix),
     },
     currentValue,
     costValue,
@@ -149,11 +153,13 @@ function parseSchemeBlock(text, header, end) {
 function groupedAccounts(holdings, fallbackInvestor, statementDate, warnings) {
   const groups = new Map();
   holdings.forEach((holding, index) => {
+    const holdingInvestor = holding.investor || {};
+    const hasHoldingIdentity = Boolean(holdingInvestor.name || holdingInvestor.pan);
     const investor = {
-      name: holding.investor?.name || fallbackInvestor.name || "",
-      pan: holding.investor?.pan || fallbackInvestor.pan || "",
-      email: holding.investor?.email || fallbackInvestor.email || "",
-      mobile: holding.investor?.mobile || fallbackInvestor.mobile || "",
+      name: holdingInvestor.name || (!hasHoldingIdentity ? fallbackInvestor.name : "") || "",
+      pan: holdingInvestor.pan || (!hasHoldingIdentity ? fallbackInvestor.pan : "") || "",
+      email: holdingInvestor.email || (!hasHoldingIdentity ? fallbackInvestor.email : "") || "",
+      mobile: holdingInvestor.mobile || (!hasHoldingIdentity ? fallbackInvestor.mobile : "") || "",
     };
     const key = accountKey(investor, index);
     if (!groups.has(key)) groups.set(key, { investor, statementDate, holdings: [], warnings });
