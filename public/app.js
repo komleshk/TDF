@@ -40,7 +40,9 @@ async function api(path, options = {}) {
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error || "The request could not be completed.");
+    const error = new Error(payload.error || "The request could not be completed.");
+    Object.assign(error, payload);
+    throw error;
   }
   return response.status === 204 ? null : response.json();
 }
@@ -299,7 +301,7 @@ async function uploadPage(query = "") {
       <section class="panel"><div class="panel-body form-stack">
         <label class="field"><span>Who is this CAS for? *</span><select name="clientId" id="uploadClient" required><option value="">Select an option</option><option value="__new__" ${selectedClient ? "" : "selected"}>＋ Create a new client from this CAS</option>${clients.map((client) => `<option value="${client.id}" ${String(client.id) === selectedClient ? "selected" : ""}>${esc(client.name)}${client.pan ? ` · ${esc(client.pan)}` : ""}</option>`).join("")}</select></label>
         <label class="check-row"><input type="checkbox" name="familyMode" value="1" id="familyMode" /><span><strong>Family CAS</strong><small>Create separate reports for each family member detected in this CAS.</small></span></label>
-        <label class="field hidden" id="familyMappingField"><span>Manual family mapping <small>(optional, one per line)</small></span><textarea name="familyMappings" placeholder="Example: 4009282/57 = Ram Singh Ratkuria | ACRPR3698E&#10;Or: Bandhan Large & Mid Cap = Ram Singh Ratkuria"></textarea><small>Use this when a folio or scheme is mapped to the wrong family member. Left side can be folio, PAN/code, or part of scheme name.</small></label>
+        <label class="field hidden" id="familyMappingField"><span>Manual family mapping <small>(shown after parsing when needed)</small></span><textarea name="familyMappings" placeholder="Example: 4009282/57 = Ram Singh Ratkuria | ACRPR3698E&#10;Or: Bandhan Large & Mid Cap = Ram Singh Ratkuria"></textarea><small id="familyMappingHelp">Upload first. If any folio/scheme cannot be mapped, the app will show it here.</small></label>
         <div class="form-grid" id="newClientFields">
           <label class="field"><span>New client name *</span><input name="newClientName" minlength="2" placeholder="Type client name if creating a new client" /></label>
           <label class="field"><span>PAN <small>(optional override)</small></span><input name="newClientPan" maxlength="10" autocapitalize="characters" placeholder="Read from CAS when available" /></label>
@@ -337,9 +339,9 @@ async function uploadPage(query = "") {
     if (familyMode.checked) clientSelect.value = "__new__";
     const isNew = clientSelect.value === "__new__";
     newClientFields.classList.toggle("hidden", !isNew);
-    familyMappingField.classList.toggle("hidden", !familyMode.checked);
     newClientName.required = isNew && !familyMode.checked;
     clientSelect.disabled = familyMode.checked;
+    if (!familyMode.checked) familyMappingField.classList.add("hidden");
   };
   clientSelect.addEventListener("change", syncClientMode);
   familyMode.addEventListener("change", syncClientMode);
@@ -373,6 +375,11 @@ async function uploadPage(query = "") {
       location.hash = `#/reports/${result.reportId}`;
     } catch (error) {
       document.querySelector("#uploadError").textContent = error.message;
+      if (error.mappingRequired) {
+        familyMappingField.classList.remove("hidden");
+        document.querySelector("#familyMappingHelp").innerHTML = `Add mapping lines for:<br>${(error.unmapped || []).map((item) => `• ${esc(item)}`).join("<br>")}`;
+        familyMappingField.querySelector("textarea").focus();
+      }
       buttonBusy(button, false);
     }
   });

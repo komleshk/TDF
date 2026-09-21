@@ -292,6 +292,42 @@ test("family CAS upload creates separate client reports", async () => {
   assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
 });
 
+test("family CAS asks for mapping only after parsing unidentified holdings", async () => {
+  const holdings = [
+    {
+      folio: "777777/01",
+      amc: "HDFC Mutual Fund",
+      schemeName: "HDFC Flexi Cap Fund Growth",
+      currentValue: 100000,
+      costValue: 90000,
+      units: 1000,
+      transactions: [{ date: "2024-01-01", amount: -90000 }],
+    },
+    {
+      folio: "888888/02",
+      amc: "SBI Mutual Fund",
+      schemeName: "SBI Gold Fund Growth",
+      currentValue: 50000,
+      costValue: 45000,
+      units: 500,
+      transactions: [{ date: "2024-02-01", amount: -45000 }],
+    },
+  ];
+  const form = new FormData();
+  form.set("familyMode", "1");
+  form.set("newClientRiskProfile", "Moderate");
+  form.set("password", "secret123");
+  form.set("cas", new Blob([await createPdf({ investor: { name: "", pan: "" }, holdings })], { type: "application/pdf" }), "unmapped-family-cas.pdf");
+
+  const response = await request("/api/cas/upload", { method: "POST", body: form });
+  const payload = await response.json();
+  assert.equal(response.status, 422);
+  assert.equal(payload.mappingRequired, true);
+  assert.equal(payload.error, "Some folios/schemes could not be mapped. Add manual mapping lines below and submit again.");
+  assert.ok(payload.unmapped.some((item) => item.includes("777777/01")));
+  assert.ok(payload.unmapped.some((item) => item.includes("SBI Gold Fund Growth")));
+});
+
 test("family CAS manual mappings assign unmapped holdings without invented names", async () => {
   const holdings = [
     {

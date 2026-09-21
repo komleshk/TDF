@@ -17,7 +17,7 @@ import { streamFamilyPdfReport, streamPdfReport, writeExcelReport } from "./repo
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot;
 const config = loadEnv();
-const appRevision = "cams-family-v12";
+const appRevision = "cams-family-v13";
 initDb(config);
 
 const brandingPath = path.join(config.storagePath, "branding");
@@ -415,8 +415,11 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
         : parsed.holdings;
       const groupedFamily = accountGroupsFromHoldings(sourceHoldings, mappings);
       if (groupedFamily.unmapped.length) {
+        const unmapped = groupedFamily.unmapped.slice(0, 10);
         return response.status(422).json({
-          error: `Some holdings could not be mapped to a family member. Add manual mapping lines for: ${groupedFamily.unmapped.slice(0, 5).join("; ")}`,
+          mappingRequired: true,
+          unmapped,
+          error: "Some folios/schemes could not be mapped. Add manual mapping lines below and submit again.",
         });
       }
       const accounts = groupedFamily.accounts.filter((account) => account.holdings?.length);
