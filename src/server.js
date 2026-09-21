@@ -12,12 +12,12 @@ import { parseCasPdf } from "./cas/parser.js";
 import { buildAnalytics } from "./analytics.js";
 import { ACTIONS, buildRecommendations } from "./recommendations.js";
 import { buildSwpProjection } from "./swp.js";
-import { streamPdfReport, writeExcelReport } from "./reports.js";
+import { streamFamilyPdfReport, streamPdfReport, writeExcelReport } from "./reports.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot;
 const config = loadEnv();
-const appRevision = "cams-family-v7";
+const appRevision = "cams-family-v8";
 initDb(config);
 
 const brandingPath = path.join(config.storagePath, "branding");
@@ -325,11 +325,11 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
     const parsed = await parseCasPdf(request.file.path, String(request.body.password || ""), { maxPages: config.maxCasPages });
     if (!parsed.holdings.length) return response.status(422).json({ error: "No holdings were found in this CAS." });
     const settings = getSettings();
-    const createReportForClient = (targetClient, portfolio) => {
+    const createReportForClient = (targetClient, portfolio, familyBatchId = null) => {
       const analytics = buildAnalytics(portfolio.holdings, settings, portfolio.statementDate);
       const reportResult = db()
-        .prepare("INSERT INTO reports (client_id,source,statement_date,portfolio_json,analytics_json,created_by) VALUES (?,?,?,?,?,?)")
-        .run(targetClient.id, portfolio.source || parsed.source, portfolio.statementDate, JSON.stringify(portfolio), JSON.stringify(analytics), request.user.id);
+        .prepare("INSERT INTO reports (client_id,source,statement_date,portfolio_json,analytics_json,family_batch_id,created_by) VALUES (?,?,?,?,?,?,?)")
+        .run(targetClient.id, portfolio.source || parsed.source, portfolio.statementDate, JSON.stringify(portfolio), JSON.stringify(analytics), familyBatchId, request.user.id);
       const reportId = Number(reportResult.lastInsertRowid);
       const insertRecommendation = db().prepare(
         `INSERT INTO recommendations
@@ -350,6 +350,7 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
       }
       const familyName = String(request.body.newClientName || "").trim();
       const riskProfile = String(request.body.newClientRiskProfile || "Moderate");
+      const familyBatchId = token(10);
       if (!validRiskProfile(riskProfile)) return response.status(400).json({ error: "Choose a valid risk profile." });
       const familyReports = transaction(() =>
         accounts.map((account, index) => {
@@ -366,15 +367,17 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
             error.status = 400;
             throw error;
           }
-          let familyClient = memberPan
-            ? db().prepare("SELECT * FROM clients WHERE pan=?").get(memberPan)
-            : db().prepare("SELECT * FROM clients WHERE lower(name)=lower(?) AND pan IS NULL").get(memberName);
+          let familyClient = db().prepare("SELECT * FROM clients WHERE lower(trim(name))=lower(trim(?)) ORDER BY id LIMIT 1").get(memberName);
+          if (!familyClient && memberPan) familyClient = db().prepare("SELECT * FROM clients WHERE pan=?").get(memberPan);
           if (!familyClient) {
             const clientResult = db()
               .prepare("INSERT INTO clients (name,pan,email,mobile,risk_profile,created_by) VALUES (?,?,?,?,?,?)")
               .run(memberName, memberPan || null, accountInvestor.email || null, String(accountInvestor.mobile || "").replace(/\D/g, "") || null, riskProfile, request.user.id);
             familyClient = { id: Number(clientResult.lastInsertRowid), name: memberName, pan: memberPan };
             audit(request.user.id, "create_from_family_cas", "client", familyClient.id);
+          } else if (!familyClient.pan && memberPan && !db().prepare("SELECT id FROM clients WHERE pan=? AND id<>?").get(memberPan, familyClient.id)) {
+            db().prepare("UPDATE clients SET pan=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(memberPan, familyClient.id);
+            familyClient = { ...familyClient, pan: memberPan };
           }
           const portfolio = {
             source: parsed.source,
@@ -383,7 +386,7 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
             holdings: account.holdings,
             warnings: account.warnings || parsed.warnings || [],
           };
-          const reportId = createReportForClient(familyClient, portfolio);
+          const reportId = createReportForClient(familyClient, portfolio, familyBatchId);
           audit(request.user.id, "upload_family_member", "report", reportId, { source: parsed.source, holdings: account.holdings.length, clientId: familyClient.id });
           return { reportId, clientId: familyClient.id, clientName: familyClient.name, pan: familyClient.pan };
         }),
@@ -391,6 +394,8 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
       return response.status(201).json({
         reportId: familyReports[0]?.reportId,
         clientId: familyReports[0]?.clientId,
+        familyBatchId,
+        familyPdfUrl: `/api/family-reports/${familyBatchId}/pdf`,
         familyReports,
         source: parsed.source,
         warnings: parsed.warnings,
@@ -528,6 +533,15 @@ app.get("/api/reports/:id/pdf", (request, response) => {
   response.setHeader("Content-Disposition", `attachment; filename="agm-wealth-review-${request.params.id}.pdf"`);
   audit(request.user.id, "generate", "pdf_report", request.params.id);
   streamPdfReport(request.params.id, response, { includeInternal: request.query.internal === "1" && request.user.role === "admin" });
+});
+
+app.get("/api/family-reports/:batchId/pdf", (request, response) => {
+  const reports = db().prepare("SELECT id FROM reports WHERE family_batch_id=? ORDER BY id").all(request.params.batchId);
+  if (!reports.length) return response.status(404).json({ error: "Family report batch not found." });
+  response.setHeader("Content-Type", "application/pdf");
+  response.setHeader("Content-Disposition", `attachment; filename="agm-wealth-family-review-${request.params.batchId}.pdf"`);
+  audit(request.user.id, "generate", "family_pdf_report", request.params.batchId, { reports: reports.length });
+  streamFamilyPdfReport(request.params.batchId, response);
 });
 
 app.get("/api/reports/:id/excel", async (request, response, next) => {

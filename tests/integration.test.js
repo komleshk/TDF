@@ -204,7 +204,7 @@ test("CAS upload can create a new client instead of requiring an existing select
   form.set("password", "secret123");
   form.set("cas", new Blob([await createPdf()], { type: "application/pdf" }), "new-client-cas.pdf");
 
-  const response = await request("/api/cas/upload", { method: "POST", body: form });
+  let response = await request("/api/cas/upload", { method: "POST", body: form });
   const payload = await response.json();
   assert.equal(response.status, 201, payload.error);
   assert.ok(payload.clientId);
@@ -255,19 +255,27 @@ test("family CAS upload creates separate client reports", async () => {
     "family-cas.pdf",
   );
 
-  const response = await request("/api/cas/upload", { method: "POST", body: form });
+  let response = await request("/api/cas/upload", { method: "POST", body: form });
   const payload = await response.json();
   assert.equal(response.status, 201, payload.error);
   assert.equal(payload.familyReports.length, 2);
+  assert.ok(payload.familyBatchId);
+  assert.equal(payload.familyPdfUrl, `/api/family-reports/${payload.familyBatchId}/pdf`);
   assert.equal(payload.familyReports[0].clientName, "Family One");
   assert.equal(payload.familyReports[1].pan, "VWXYZ5678A");
 
   const firstReport = await (await request(`/api/reports/${payload.familyReports[0].reportId}`)).json();
   const secondReport = await (await request(`/api/reports/${payload.familyReports[1].reportId}`)).json();
   assert.equal(firstReport.report.client_name, "Family One");
+  assert.equal(firstReport.report.family_batch_id, payload.familyBatchId);
   assert.equal(firstReport.report.portfolio.holdings.length, 1);
   assert.equal(secondReport.report.client_name, "Family Two");
   assert.equal(secondReport.report.portfolio.holdings[0].currentValue, 250000);
+
+  response = await request(payload.familyPdfUrl);
+  assert.equal(response.status, 200);
+  const pdf = Buffer.from(await response.arrayBuffer());
+  assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
 });
 
 test("new client CAS upload gives clear instruction when client name is missing", async () => {

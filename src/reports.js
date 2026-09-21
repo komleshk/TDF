@@ -235,6 +235,98 @@ export function streamPdfReport(reportId, response, { includeInternal = false } 
   doc.end();
 }
 
+export function streamFamilyPdfReport(familyBatchId, response) {
+  const rows = db()
+    .prepare("SELECT id FROM reports WHERE family_batch_id=? ORDER BY id")
+    .all(familyBatchId);
+  const reports = rows.map((row) => loadReport(row.id)).filter(Boolean);
+  if (!reports.length) throw new Error("Family report batch not found");
+  const settings = getSettings();
+  const doc = new PDFDocument({ margin: 48, size: "A4", info: { Title: "Family Portfolio Review", Author: settings.companyName } });
+  doc.pipe(response);
+
+  const familyValue = reports.reduce((sum, report) => sum + report.analytics.totalValue, 0);
+  const familyCost = reports.reduce((sum, report) => sum + report.analytics.totalCost, 0);
+  doc.rect(0, 0, 595, 842).fill("#f8fafc");
+  doc.rect(0, 0, 595, 16).fill("#c59742");
+  doc.fillColor("#15375b").fontSize(30).font("Helvetica-Bold").text(settings.companyName, 48, 90);
+  doc.fontSize(13).font("Helvetica").fillColor("#64748b").text("Family Portfolio Review", 48, 135);
+  doc.moveTo(48, 175).lineTo(547, 175).strokeColor("#d7dee8").stroke();
+  doc.fillColor("#15375b").fontSize(18).font("Helvetica-Bold").text(`${reports.length} family members`, 48, 220);
+  doc.fillColor("#334155").fontSize(11).font("Helvetica");
+  doc.text(`Combined current value: ${inr(familyValue)}`, 48, 255);
+  doc.text(`Combined invested cost: ${inr(familyCost)}`, 48, 275);
+  doc.text(`Combined gain/loss: ${inr(familyValue - familyCost)} (${pct(familyCost ? ((familyValue - familyCost) / familyCost) * 100 : 0)})`, 48, 295);
+  doc.text(`Prepared on: ${new Date().toLocaleDateString("en-IN")}`, 48, 315);
+
+  let y = 365;
+  y = pdfTableHeader(doc, y, [
+    { label: "Family member", x: 48, width: 190 },
+    { label: "PAN", x: 242, width: 95 },
+    { label: "Cost", x: 342, width: 80 },
+    { label: "Value", x: 426, width: 80 },
+    { label: "Gain", x: 510, width: 38 },
+  ]);
+  for (const report of reports) {
+    doc.fillColor("#1e293b").fontSize(8.5).font("Helvetica");
+    doc.text(report.client_name, 48, y + 6, { width: 190 });
+    doc.text(report.pan || "—", 242, y + 6, { width: 95 });
+    doc.text(inr(report.analytics.totalCost), 342, y + 6, { width: 80, align: "right" });
+    doc.text(inr(report.analytics.totalValue), 426, y + 6, { width: 80, align: "right" });
+    doc.text(pct(report.analytics.gainPercent), 510, y + 6, { width: 38, align: "right" });
+    doc.moveTo(48, y + 25).lineTo(548, y + 25).strokeColor("#e2e8f0").stroke();
+    y += 25;
+  }
+
+  for (const report of reports) {
+    doc.addPage();
+    doc.fillColor("#15375b").fontSize(18).font("Helvetica-Bold").text(report.client_name);
+    doc.fillColor("#64748b").fontSize(9).font("Helvetica").text(`${report.source} CAS${report.pan ? ` · PAN ${report.pan}` : ""}`, 48, 74);
+    doc.fillColor("#334155").fontSize(10);
+    doc.text(`Current value: ${inr(report.analytics.totalValue)}`, 48, 105);
+    doc.text(`Invested cost: ${inr(report.analytics.totalCost)}`, 48, 123);
+    doc.text(`Gain/loss: ${inr(report.analytics.absoluteGain)} (${pct(report.analytics.gainPercent)})`, 48, 141);
+    doc.text(`Portfolio XIRR: ${returnPct(report.analytics.xirr)}`, 48, 159);
+
+    y = 195;
+    y = pdfTableHeader(doc, y, [
+      { label: "Scheme", x: 48, width: 180 },
+      { label: "Folio", x: 232, width: 70 },
+      { label: "Cost", x: 306, width: 70 },
+      { label: "Value", x: 380, width: 70 },
+      { label: "Gain", x: 454, width: 70 },
+    ]);
+    for (const holding of report.portfolio.holdings) {
+      const rowHeight = Math.max(30, doc.heightOfString(holding.schemeName, { width: 180 }) + 12);
+      y = ensurePage(doc, y, rowHeight + 8);
+      if (y === 48) {
+        doc.fillColor("#15375b").fontSize(18).font("Helvetica-Bold").text(`${report.client_name} holdings`);
+        y = pdfTableHeader(doc, 82, [
+          { label: "Scheme", x: 48, width: 180 },
+          { label: "Folio", x: 232, width: 70 },
+          { label: "Cost", x: 306, width: 70 },
+          { label: "Value", x: 380, width: 70 },
+          { label: "Gain", x: 454, width: 70 },
+        ]);
+      }
+      doc.fillColor("#1e293b").fontSize(7.5).font("Helvetica");
+      doc.text(holding.schemeName, 48, y + 6, { width: 180 });
+      doc.text(holding.folio || "—", 232, y + 6, { width: 70 });
+      doc.text(inr(holding.costValue), 306, y + 6, { width: 70, align: "right" });
+      doc.text(inr(holding.currentValue), 380, y + 6, { width: 70, align: "right" });
+      doc.text(inr(holding.absoluteGain), 454, y + 6, { width: 70, align: "right" });
+      doc.moveTo(48, y + rowHeight).lineTo(548, y + rowHeight).strokeColor("#e2e8f0").stroke();
+      y += rowHeight;
+    }
+  }
+
+  doc.addPage();
+  doc.fillColor("#15375b").fontSize(18).font("Helvetica-Bold").text("Important disclaimer");
+  doc.fillColor("#475569").fontSize(10).font("Helvetica").text(settings.disclaimer, 48, 90, { width: 500, lineGap: 5 });
+  doc.fontSize(9).fillColor("#64748b").text(settings.reportFooter, 48, 730, { align: "center", width: 500 });
+  doc.end();
+}
+
 function styleSheet(sheet) {
   sheet.views = [{ state: "frozen", ySplit: 1 }];
   sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };

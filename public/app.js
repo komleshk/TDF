@@ -387,8 +387,9 @@ function renderReport() {
   const { report, recommendations, internalNotes } = state.currentReport;
   const gainClass = report.analytics.absoluteGain >= 0 ? "positive" : "negative";
   const returnMeasure = report.analytics.xirr == null ? "Unavailable" : `${report.analytics.xirr.toFixed(2)}%`;
+  const familyPdf = report.family_batch_id ? `<a class="button primary" href="/api/family-reports/${encodeURIComponent(report.family_batch_id)}/pdf">↓ Family PDF</a>` : "";
   document.querySelector("#view").innerHTML = `<div class="page">
-    ${pageHeader(`${report.client_name}'s portfolio`, `${report.source} CAS · reviewed ${date(report.created_at)}`, `<a class="button secondary" href="/api/reports/${report.id}/excel">↓ Excel</a><a class="button gold" href="/api/reports/${report.id}/pdf">↓ Client PDF</a>`)}
+    ${pageHeader(`${report.client_name}'s portfolio`, `${report.source} CAS · reviewed ${date(report.created_at)}`, `<a class="button secondary" href="/api/reports/${report.id}/excel">↓ Excel</a><a class="button gold" href="/api/reports/${report.id}/pdf">↓ Client PDF</a>${familyPdf}`)}
     <div class="report-summary">
       ${stat("Current value", money.format(report.analytics.totalValue), "₹")}
       ${stat("Invested cost", money.format(report.analytics.totalCost), "◫")}

@@ -64,6 +64,7 @@ export function initDb(config) {
       status TEXT NOT NULL DEFAULT 'ready',
       portfolio_json TEXT NOT NULL,
       analytics_json TEXT NOT NULL,
+      family_batch_id TEXT,
       model_portfolio_id INTEGER REFERENCES model_portfolios(id) ON DELETE SET NULL,
       swp_json TEXT,
       created_by INTEGER NOT NULL REFERENCES users(id),
@@ -112,6 +113,7 @@ export function initDb(config) {
   const reportColumns = database.prepare("PRAGMA table_info(reports)").all().map((column) => column.name);
   if (!reportColumns.includes("model_portfolio_id")) database.exec("ALTER TABLE reports ADD COLUMN model_portfolio_id INTEGER REFERENCES model_portfolios(id)");
   if (!reportColumns.includes("swp_json")) database.exec("ALTER TABLE reports ADD COLUMN swp_json TEXT");
+  if (!reportColumns.includes("family_batch_id")) database.exec("ALTER TABLE reports ADD COLUMN family_batch_id TEXT");
   const duplicatePans = database
     .prepare("SELECT pan, COUNT(*) count FROM clients WHERE pan IS NOT NULL AND pan <> '' GROUP BY pan HAVING COUNT(*) > 1")
     .all();
@@ -121,6 +123,7 @@ export function initDb(config) {
   database.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS clients_pan_unique ON clients(pan) WHERE pan IS NOT NULL AND pan <> '';
     CREATE INDEX IF NOT EXISTS reports_client_created ON reports(client_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS reports_family_batch ON reports(family_batch_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS audit_created ON audit_log(created_at DESC);
     INSERT OR IGNORE INTO schema_migrations (version) VALUES (1), (2);
   `);
