@@ -17,7 +17,8 @@ const monthMap = {
 };
 
 const money = String.raw`[\d,]+(?:\.\d+)?`;
-const schemeHeader = /PAN:\s*(?:OK\s+)?([A-Z0-9]+)\s*-\s*([\s\S]*?)\s+\((?:Non-)?Demat\)\s*-\s*ISIN:\s*([A-Z0-9]+)/gi;
+const dematMarker = String.raw`\(\s*(?:Non\s*[-–]?\s*)?Demat\s*\)\s*-\s*ISIN\s*:`;
+const schemeHeader = new RegExp(String.raw`PAN:\s*(?:OK\s+)?([A-Z0-9]+)\s*-\s*([\s\S]*?)\s+${dematMarker}\s*([A-Z0-9]+)`, "gi");
 
 function toIsoDate(value) {
   const match = String(value || "").trim().match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
@@ -67,9 +68,26 @@ function accountKey(investor, index) {
   return investor.pan || investor.name.toLowerCase() || `account-${index}`;
 }
 
+function cleanSchemeName(value) {
+  return cleanSpaces(value)
+    .replace(new RegExp(String.raw`\s+${dematMarker}[\s\S]*$`, "i"), "")
+    .split(/\s+(?:Advisor|Registrar|Folio\s+No\.?|Nominee|Opening\s+Unit\s+Balance|Date\s+Amount\s+Price\s+Units\s+Transaction|CAMSCASWS)\b/i)[0]
+    .trim();
+}
+
 function lastMutualFundName(text) {
   const matches = [...text.matchAll(/([A-Z][A-Za-z&.\-\s]+Mutual Fund)\s+PAN:/gi)];
   return cleanSpaces(matches.at(-1)?.[1] || "Unknown AMC");
+}
+
+function folioDetails(block) {
+  const compact = cleanSpaces(block);
+  const match = compact.match(/\bFolio\s+No\.?:\s*([0-9][0-9\s/]{2,30})\s+([A-Za-z][A-Za-z .'\-]{1,80}?)(?=\s+(?:Nominee|Mode|Opening\s+Unit\s+Balance|\d{2}-[A-Za-z]{3}-\d{4}|CAMSCASWS|Date\s+Amount)|$)/i);
+  const fallbackFolio = compact.match(/\bFolio\s+No\.?:\s*([0-9][0-9\s/]{2,30})/i)?.[1] || compact.match(/\bFolio:\s*([0-9/]+)/i)?.[1] || "";
+  return {
+    folio: cleanSpaces(match?.[1] || fallbackFolio).replace(/\s*\/\s*/g, "/"),
+    name: plausibleInvestorName(match?.[2]),
+  };
 }
 
 function parseTransactions(block) {
@@ -105,19 +123,19 @@ function parseSchemeBlock(text, header, end) {
   const closing = block.match(new RegExp(String.raw`Closing\s+Unit\s+Balance:\s*(-?${money})\s+Total\s+Cost\s+Value:\s*(${money})`, "i"));
   if (!valuation && !closing) return null;
 
-  const schemeName = cleanSpaces(header[2]);
+  const schemeName = cleanSchemeName(header[2]);
   const currentValue = valuation ? amount(valuation[3]) : 0;
   const costValue = closing ? amount(closing[2]) : 0;
   const units = closing ? amount(closing[1]) : 0;
   if (!currentValue && !units) return null;
 
-  const folio = block.match(/\bFolio\s+No\.?:\s*([0-9/]+)/i)?.[1] || block.match(/\bFolio:\s*([0-9/]+)/i)?.[1] || "";
+  const folio = folioDetails(block);
   return {
-    folio,
+    folio: folio.folio,
     amc: lastMutualFundName(prefix),
     schemeName,
     investor: {
-      name: extractInvestorName(prefix),
+      name: folio.name || extractInvestorName(prefix),
       pan: extractInvestorPan(prefix),
     },
     currentValue,
@@ -186,7 +204,7 @@ export class CamsAdapter extends GenericCasAdapter {
     const statementDate = toIsoDate(text.match(/\bTo\s+(\d{2}-[A-Za-z]{3}-\d{4})\b/i)?.[1]);
 
     const investor = {
-      name: extractInvestorName(text),
+      name: extractInvestorName(text) || holdings.find((holding) => holding.investor?.name)?.investor.name || "",
       pan: text.match(/\b[A-Z]{5}[0-9]{4}[A-Z]\b/)?.[0] || "",
       email: text.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0] || "",
       mobile: text.match(/(?:\+91[-\s]?)?[6-9]\d{9}/)?.[0] || "",

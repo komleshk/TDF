@@ -17,7 +17,7 @@ import { streamPdfReport, writeExcelReport } from "./reports.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot;
 const config = loadEnv();
-const appRevision = "cams-family-v6";
+const appRevision = "cams-family-v7";
 initDb(config);
 
 const brandingPath = path.join(config.storagePath, "branding");
@@ -361,16 +361,18 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
             error.status = 400;
             throw error;
           }
-          if (!memberPan || !validPan(memberPan)) {
+          if (memberPan && !validPan(memberPan)) {
             const error = new Error(`${memberName}'s PAN was not readable or valid. Upload that member separately or correct the CAS source.`);
             error.status = 400;
             throw error;
           }
-          let familyClient = db().prepare("SELECT * FROM clients WHERE pan=?").get(memberPan);
+          let familyClient = memberPan
+            ? db().prepare("SELECT * FROM clients WHERE pan=?").get(memberPan)
+            : db().prepare("SELECT * FROM clients WHERE lower(name)=lower(?) AND pan IS NULL").get(memberName);
           if (!familyClient) {
             const clientResult = db()
               .prepare("INSERT INTO clients (name,pan,email,mobile,risk_profile,created_by) VALUES (?,?,?,?,?,?)")
-              .run(memberName, memberPan, accountInvestor.email || null, String(accountInvestor.mobile || "").replace(/\D/g, "") || null, riskProfile, request.user.id);
+              .run(memberName, memberPan || null, accountInvestor.email || null, String(accountInvestor.mobile || "").replace(/\D/g, "") || null, riskProfile, request.user.id);
             familyClient = { id: Number(clientResult.lastInsertRowid), name: memberName, pan: memberPan };
             audit(request.user.id, "create_from_family_cas", "client", familyClient.id);
           }

@@ -134,6 +134,23 @@ test("CAMS family text is split into separate investor accounts", () => {
   assert.equal(parsed.accounts[1].holdings[0].currentValue, 240000);
 });
 
+test("CAMS spaced demat headers keep scheme name clean and read folio holder name", () => {
+  const parsed = parseCasText(`
+    CAMSCASWS-11092617138 Version:V3.5 Live-1018 Consolidated Account Statement
+    Bandhan Mutual Fund PAN:
+    PAN: OK INF194K01524 - Bandhan Large & Mid Cap Fund - Regular Plan - Growth ( Formerly Known as Bandhan Core Equity Fund-Regular Plan-Growth ) (Non - Demat) - ISIN: INF194K01524(Advisor: ARN-177245) Registrar : CAMS Folio No: 4009282 / 57 Ram Singh Ratkuria Nominee 1: Jaideep Singh Nominee 2: Nominee 3: Opening Unit Balance: 0.000
+    17-Jul-2023 9,999.50 83.119 120.303 Systematic Purchase Physical - Instalment 1
+    10-Aug-2023 9,999.50 85.155 117.427 Systematic Purchase - Instalment 2/918 Physical
+    Closing Unit Balance: 237.730 Total Cost Value: 19,999.00
+    NAV on 11-Sep-2026: INR 100.0000 Market Value on 11-Sep-2026: INR 23,773.00
+  `);
+  assert.equal(parsed.holdings.length, 1);
+  assert.equal(parsed.holdings[0].schemeName, "Bandhan Large & Mid Cap Fund - Regular Plan - Growth ( Formerly Known as Bandhan Core Equity Fund-Regular Plan-Growth )");
+  assert.equal(parsed.holdings[0].folio, "4009282/57");
+  assert.equal(parsed.accounts[0]?.investor.name || parsed.investor.name, "Ram Singh Ratkuria");
+  assert.equal(parsed.holdings[0].currentValue, 23773);
+});
+
 test("CAMS extraction rejects page-sized generic rows instead of creating a corrupt report", () => {
   assert.throws(
     () =>
