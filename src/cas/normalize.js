@@ -5,7 +5,7 @@ export function amount(value) {
 
 export function inferAssetClass(scheme = "", category = "") {
   const text = `${scheme} ${category}`.toLowerCase();
-  if (/gold|silver/.test(text)) return "Gold";
+  if (/gold|silver/.test(text)) return "Gold/Silver";
   if (/international|global|nasdaq|overseas|us equity/.test(text)) return "International";
   if (/liquid|overnight|money market|gilt|bond|debt|duration|credit risk|floater/.test(text)) return "Debt";
   if (/hybrid|balanced|multi asset|arbitrage|equity savings/.test(text)) return "Hybrid";
@@ -24,6 +24,7 @@ export function inferCategory(scheme = "") {
     ["Large Cap", /large cap|bluechip/],
     ["Flexi Cap", /flexi cap|multi cap/],
     ["Index", /index|nifty|sensex/],
+    ["Gold/Silver", /gold|silver/],
     ["Liquid/Overnight", /liquid|overnight/],
     ["Debt", /debt|bond|gilt|duration|credit risk|floater/],
     ["Hybrid", /hybrid|balanced|multi asset|arbitrage|equity savings/],

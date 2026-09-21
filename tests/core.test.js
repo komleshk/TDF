@@ -9,6 +9,7 @@ import { recommendationFor } from "../src/recommendations.js";
 import { buildSwpProjection } from "../src/swp.js";
 import { parseCasPdf, parseCasText } from "../src/cas/parser.js";
 import { validateConfig } from "../src/config.js";
+import { normalizeHolding } from "../src/cas/normalize.js";
 
 const fixture = {
   investor: {
@@ -197,6 +198,15 @@ test("analytics calculate totals, allocations and XIRR", () => {
   assert.equal(analytics.holdingReturns[1].xirr, null);
   assert.equal(analytics.holdingReturns[1].status, "missing-cashflows");
   assert.ok(xirr([{ date: "2020-01-01", amount: -100 }, { date: "2021-01-01", amount: 110 }]) > 9);
+});
+
+test("gold and silver funds are tagged as Gold/Silver", () => {
+  const silver = normalizeHolding({ schemeName: "ICICI Prudential Silver ETF Fund of Fund Growth", currentValue: 10000 });
+  const gold = normalizeHolding({ schemeName: "SBI Gold Fund Growth", currentValue: 10000 });
+  assert.equal(silver.assetClass, "Gold/Silver");
+  assert.equal(silver.category, "Gold/Silver");
+  assert.equal(gold.assetClass, "Gold/Silver");
+  assert.equal(gold.category, "Gold/Silver");
 });
 
 test("CAGR is withheld for multiple investments while XIRR remains available", () => {
