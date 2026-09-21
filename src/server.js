@@ -17,7 +17,7 @@ import { streamFamilyPdfReport, streamPdfReport, writeExcelReport } from "./repo
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot;
 const config = loadEnv();
-const appRevision = "cams-family-v13";
+const appRevision = "cams-family-v14";
 initDb(config);
 
 const brandingPath = path.join(config.storagePath, "branding");
@@ -147,6 +147,25 @@ function parseFamilyMappings(value) {
     .filter((mapping) => mapping?.matchKey && mapping.name);
 }
 
+function parseFamilyMemberOverrides(value) {
+  try {
+    const rows = JSON.parse(String(value || "[]"));
+    if (!Array.isArray(rows)) return new Map();
+    return new Map(
+      rows
+        .map((row) => {
+          const selector = String(row?.selector || "").trim();
+          const name = String(row?.name || "").trim();
+          const pan = String(row?.pan || "").trim().toUpperCase();
+          return selector ? [selector, { name, pan }] : null;
+        })
+        .filter(Boolean),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
 function mappingForHolding(holding, mappings) {
   const searchable = normalizedMatchText([
     holding.folio,
@@ -173,7 +192,7 @@ function accountGroupsFromHoldings(holdings, mappings) {
       unmapped.push(`${holding.folio || "No folio"} · ${holding.schemeName || `Holding ${index + 1}`}`);
       return;
     }
-    const key = normalizedPersonName(investor.name) || (investor.pan ? `pan:${investor.pan}` : `holding-${index + 1}`);
+    const key = investor.pan ? `pan:${investor.pan}` : normalizedPersonName(investor.name) || `holding-${index + 1}`;
     if (!groups.has(key)) {
       groups.set(key, { investor, statementDate: null, holdings: [], warnings: [] });
     }
@@ -183,6 +202,28 @@ function accountGroupsFromHoldings(holdings, mappings) {
     if (!grouped.investor.name && investor.name) grouped.investor.name = investor.name;
   });
   return { accounts: [...groups.values()], unmapped };
+}
+
+function familyMemberSelector(account, index) {
+  const investor = account.investor || {};
+  const firstHolding = account.holdings?.[0] || {};
+  return String(investor.pan || investor.name || firstHolding.folio || firstHolding.schemeName || `member-${index + 1}`).trim();
+}
+
+function familyReviewMembers(accounts) {
+  return accounts.map((account, index) => {
+    const investor = account.investor || {};
+    const folios = [...new Set((account.holdings || []).map((holding) => holding.folio).filter(Boolean))];
+    return {
+      selector: familyMemberSelector(account, index),
+      name: String(investor.name || "").trim(),
+      pan: String(investor.pan || "").trim().toUpperCase(),
+      folioCount: folios.length,
+      holdingCount: account.holdings?.length || 0,
+      currentValue: (account.holdings || []).reduce((sum, holding) => sum + Number(holding.currentValue || 0), 0),
+      sampleFolios: folios.slice(0, 3),
+    };
+  });
 }
 
 function publicAppConfig() {
@@ -429,11 +470,35 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
       const riskProfile = String(request.body.newClientRiskProfile || "Moderate");
       const familyBatchId = token(10);
       if (!validRiskProfile(riskProfile)) return response.status(400).json({ error: "Choose a valid risk profile." });
-      const mergedAccounts = [...accounts.reduce((groups, account, index) => {
+      if (request.body.familyReviewed !== "1") {
+        return response.json({
+          familyReviewRequired: true,
+          familyMembers: familyReviewMembers(accounts),
+          source: parsed.source,
+          warnings: parsed.warnings,
+        });
+      }
+      const memberOverrides = parseFamilyMemberOverrides(request.body.familyMemberOverrides);
+      const reviewedAccounts = accounts.map((account, index) => {
+        const selector = familyMemberSelector(account, index);
+        const override = memberOverrides.get(selector);
+        if (!override) return account;
+        const investor = {
+          ...(account.investor || {}),
+          name: override.name || account.investor?.name || "",
+          pan: override.pan,
+        };
+        return {
+          ...account,
+          investor,
+          holdings: (account.holdings || []).map((holding) => ({ ...holding, investor })),
+        };
+      });
+      const mergedAccounts = [...reviewedAccounts.reduce((groups, account, index) => {
         const accountInvestor = account.investor || {};
         const memberName = String(accountInvestor.name || "").trim();
         const memberPan = String(accountInvestor.pan || "").trim().toUpperCase();
-        const key = normalizedPersonName(memberName) || (memberPan ? `pan:${memberPan}` : `member-${index + 1}`);
+        const key = memberPan ? `pan:${memberPan}` : normalizedPersonName(memberName) || `member-${index + 1}`;
         if (!groups.has(key)) {
           groups.set(key, {
             ...account,
@@ -464,8 +529,8 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
             error.status = 400;
             throw error;
           }
-          let familyClient = db().prepare("SELECT * FROM clients WHERE lower(trim(name))=lower(trim(?)) ORDER BY id LIMIT 1").get(memberName);
-          if (!familyClient && memberPan) familyClient = db().prepare("SELECT * FROM clients WHERE pan=?").get(memberPan);
+          let familyClient = memberPan ? db().prepare("SELECT * FROM clients WHERE pan=?").get(memberPan) : null;
+          if (!familyClient) familyClient = db().prepare("SELECT * FROM clients WHERE lower(trim(name))=lower(trim(?)) ORDER BY id LIMIT 1").get(memberName);
           if (!familyClient) {
             const clientResult = db()
               .prepare("INSERT INTO clients (name,pan,email,mobile,risk_profile,created_by) VALUES (?,?,?,?,?,?)")

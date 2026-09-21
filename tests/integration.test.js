@@ -257,19 +257,32 @@ test("family CAS upload creates separate client reports", async () => {
       }],
     },
   ];
+  const familyPdf = await createPdf({ accounts, holdings: accounts.flatMap((account) => account.holdings), investor: { name: "Family", pan: "ABCDE1234F" } });
   const form = new FormData();
   form.set("familyMode", "1");
   form.set("newClientName", "Family");
   form.set("newClientRiskProfile", "Moderate");
   form.set("password", "secret123");
-  form.set(
-    "cas",
-    new Blob([await createPdf({ accounts, holdings: accounts.flatMap((account) => account.holdings), investor: { name: "Family", pan: "ABCDE1234F" } })], { type: "application/pdf" }),
-    "family-cas.pdf",
-  );
+  form.set("cas", new Blob([familyPdf], { type: "application/pdf" }), "family-cas.pdf");
 
   let response = await request("/api/cas/upload", { method: "POST", body: form });
-  const payload = await response.json();
+  let payload = await response.json();
+  assert.equal(response.status, 200, payload.error);
+  assert.equal(payload.familyReviewRequired, true);
+  assert.equal(payload.familyMembers.length, 2);
+  assert.equal(payload.familyMembers[0].name, "Family One");
+  assert.equal(payload.familyMembers[1].pan, "VWXYZ5678A");
+
+  const confirmForm = new FormData();
+  confirmForm.set("familyMode", "1");
+  confirmForm.set("familyReviewed", "1");
+  confirmForm.set("familyMemberOverrides", JSON.stringify(payload.familyMembers.map((member) => ({ selector: member.selector, name: member.name, pan: member.pan }))));
+  confirmForm.set("newClientRiskProfile", "Moderate");
+  confirmForm.set("password", "secret123");
+  confirmForm.set("cas", new Blob([familyPdf], { type: "application/pdf" }), "family-cas.pdf");
+
+  response = await request("/api/cas/upload", { method: "POST", body: confirmForm });
+  payload = await response.json();
   assert.equal(response.status, 201, payload.error);
   assert.equal(payload.familyReports.length, 2);
   assert.ok(payload.familyBatchId);
@@ -290,6 +303,49 @@ test("family CAS upload creates separate client reports", async () => {
   assert.equal(response.status, 200);
   const pdf = Buffer.from(await response.arrayBuffer());
   assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
+});
+
+test("family CAS keeps same detected name separate when PANs differ", async () => {
+  const accounts = [
+    {
+      investor: { name: "Same Detected Name", pan: "AAAAA1111A" },
+      statementDate: "2026-06-01",
+      holdings: [{
+        folio: "41001",
+        amc: "HDFC Mutual Fund",
+        schemeName: "HDFC Flexi Cap Fund Growth",
+        currentValue: 100000,
+        costValue: 90000,
+        units: 1000,
+        transactions: [{ date: "2024-01-01", amount: -90000 }],
+      }],
+    },
+    {
+      investor: { name: "Same Detected Name", pan: "BBBBB2222B" },
+      statementDate: "2026-06-01",
+      holdings: [{
+        folio: "42001",
+        amc: "SBI Mutual Fund",
+        schemeName: "SBI Bluechip Fund Growth",
+        currentValue: 50000,
+        costValue: 45000,
+        units: 500,
+        transactions: [{ date: "2024-02-01", amount: -45000 }],
+      }],
+    },
+  ];
+  const form = new FormData();
+  form.set("familyMode", "1");
+  form.set("newClientRiskProfile", "Moderate");
+  form.set("password", "secret123");
+  form.set("cas", new Blob([await createPdf({ accounts, holdings: accounts.flatMap((account) => account.holdings), investor: { name: "Family", pan: "" } })], { type: "application/pdf" }), "same-name-family-cas.pdf");
+
+  const response = await request("/api/cas/upload", { method: "POST", body: form });
+  const payload = await response.json();
+  assert.equal(response.status, 200, payload.error);
+  assert.equal(payload.familyReviewRequired, true);
+  assert.equal(payload.familyMembers.length, 2);
+  assert.deepEqual(payload.familyMembers.map((member) => member.pan), ["AAAAA1111A", "BBBBB2222B"]);
 });
 
 test("family CAS asks for mapping only after parsing unidentified holdings", async () => {
@@ -349,15 +405,31 @@ test("family CAS manual mappings assign unmapped holdings without invented names
       transactions: [{ date: "2024-02-01", amount: -45000 }],
     },
   ];
+  const familyPdf = await createPdf({ investor: { name: "", pan: "" }, holdings });
   const form = new FormData();
   form.set("familyMode", "1");
   form.set("newClientRiskProfile", "Moderate");
   form.set("familyMappings", "777777/01 = Manual One | MANUL1234A\nSBI Gold Fund = Manual Two | MANUL5678B");
   form.set("password", "secret123");
-  form.set("cas", new Blob([await createPdf({ investor: { name: "", pan: "" }, holdings })], { type: "application/pdf" }), "manual-family-cas.pdf");
+  form.set("cas", new Blob([familyPdf], { type: "application/pdf" }), "manual-family-cas.pdf");
 
-  const response = await request("/api/cas/upload", { method: "POST", body: form });
-  const payload = await response.json();
+  let response = await request("/api/cas/upload", { method: "POST", body: form });
+  let payload = await response.json();
+  assert.equal(response.status, 200, payload.error);
+  assert.equal(payload.familyReviewRequired, true);
+  assert.equal(payload.familyMembers.length, 2);
+
+  const confirmForm = new FormData();
+  confirmForm.set("familyMode", "1");
+  confirmForm.set("familyReviewed", "1");
+  confirmForm.set("familyMappings", "777777/01 = Manual One | MANUL1234A\nSBI Gold Fund = Manual Two | MANUL5678B");
+  confirmForm.set("familyMemberOverrides", JSON.stringify(payload.familyMembers.map((member) => ({ selector: member.selector, name: member.name, pan: member.pan }))));
+  confirmForm.set("newClientRiskProfile", "Moderate");
+  confirmForm.set("password", "secret123");
+  confirmForm.set("cas", new Blob([familyPdf], { type: "application/pdf" }), "manual-family-cas.pdf");
+
+  response = await request("/api/cas/upload", { method: "POST", body: confirmForm });
+  payload = await response.json();
   assert.equal(response.status, 201, payload.error);
   assert.equal(payload.familyReports.length, 2);
   assert.equal(payload.familyReports[0].clientName, "Manual One");

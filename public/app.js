@@ -315,6 +315,9 @@ async function uploadPage(query = "") {
         </label>
         <div id="fileInfo"></div>
         <label class="field"><span>PDF password <small>(only if protected)</small></span><input name="password" type="password" autocomplete="off" /><small>The password is used in memory for this upload and is never saved.</small></label>
+        <input type="hidden" name="familyReviewed" id="familyReviewed" value="" />
+        <input type="hidden" name="familyMemberOverrides" id="familyMemberOverrides" value="" />
+        <div class="hidden" id="familyReviewPanel"></div>
         <p class="form-error" id="uploadError"></p>
         <button class="button primary" type="submit">Process CAS and create review</button>
       </div></section>
@@ -335,13 +338,21 @@ async function uploadPage(query = "") {
   const newClientName = document.querySelector('input[name="newClientName"]');
   const familyMode = document.querySelector("#familyMode");
   const familyMappingField = document.querySelector("#familyMappingField");
+  const familyReviewPanel = document.querySelector("#familyReviewPanel");
+  const familyReviewed = document.querySelector("#familyReviewed");
+  const familyMemberOverrides = document.querySelector("#familyMemberOverrides");
   const syncClientMode = () => {
     if (familyMode.checked) clientSelect.value = "__new__";
     const isNew = clientSelect.value === "__new__";
     newClientFields.classList.toggle("hidden", !isNew);
     newClientName.required = isNew && !familyMode.checked;
     clientSelect.disabled = familyMode.checked;
-    if (!familyMode.checked) familyMappingField.classList.add("hidden");
+    if (!familyMode.checked) {
+      familyMappingField.classList.add("hidden");
+      familyReviewPanel.classList.add("hidden");
+      familyReviewed.value = "";
+      familyMemberOverrides.value = "";
+    }
   };
   clientSelect.addEventListener("change", syncClientMode);
   familyMode.addEventListener("change", syncClientMode);
@@ -349,6 +360,13 @@ async function uploadPage(query = "") {
   const showFile = (file) => {
     state.selectedFile = file;
     document.querySelector("#fileInfo").innerHTML = file ? `<div class="file-chip"><span><strong>${esc(file.name)}</strong><br><span class="muted small">${(file.size / 1024 / 1024).toFixed(2)} MB</span></span><span class="badge green">Ready</span></div>` : "";
+    familyReviewPanel.classList.add("hidden");
+    familyReviewPanel.innerHTML = "";
+    familyReviewed.value = "";
+    familyMemberOverrides.value = "";
+    const button = document.querySelector('#uploadForm button[type="submit"]');
+    button.textContent = "Process CAS and create review";
+    button.dataset.label = "Process CAS and create review";
   };
   fileInput.addEventListener("change", () => showFile(fileInput.files[0]));
   ["dragenter", "dragover"].forEach((name) => dropzone.addEventListener(name, (event) => { event.preventDefault(); dropzone.classList.add("dragging"); }));
@@ -361,14 +379,52 @@ async function uploadPage(query = "") {
     fileInput.files = transfer.files;
     showFile(file);
   });
+  const collectFamilyReview = () => {
+    if (familyReviewPanel.classList.contains("hidden")) return;
+    const rows = [...familyReviewPanel.querySelectorAll("[data-family-selector]")].map((row) => ({
+      selector: row.dataset.familySelector,
+      name: row.querySelector('[name="reviewName"]').value.trim(),
+      pan: row.querySelector('[name="reviewPan"]').value.trim().toUpperCase(),
+    }));
+    familyReviewed.value = "1";
+    familyMemberOverrides.value = JSON.stringify(rows);
+  };
+  const showFamilyReview = (members) => {
+    familyReviewed.value = "";
+    familyMemberOverrides.value = "";
+    familyReviewPanel.classList.remove("hidden");
+    familyReviewPanel.innerHTML = `<section class="panel" style="margin-top:12px"><div class="panel-header"><div><h2>Review family members before creating reports</h2><span class="muted small">Correct the name/PAN here first. Reports will be created only after you click Create family reports.</span></div></div><div class="table-wrap"><table><thead><tr><th>Detected member</th><th>PAN</th><th>Folios</th><th class="text-right">Value</th></tr></thead><tbody>${members.map((member, index) => `<tr data-family-selector="${esc(member.selector)}"><td><label class="field"><span>Name ${index + 1}</span><input name="reviewName" value="${esc(member.name)}" placeholder="Enter correct family member name" required /></label><small class="muted">Sample folio: ${esc((member.sampleFolios || []).join(", ") || "—")}</small></td><td><label class="field"><span>PAN</span><input name="reviewPan" value="${esc(member.pan)}" maxlength="10" autocapitalize="characters" /></label></td><td>${esc(member.folioCount)} folio(s)<br><span class="muted small">${esc(member.holdingCount)} holding(s)</span></td><td class="money text-right">${money.format(member.currentValue || 0)}</td></tr>`).join("")}</tbody></table></div></section>`;
+    document.querySelector("#uploadError").textContent = "Please review/correct the family member names, then click Create family reports.";
+    const button = document.querySelector('#uploadForm button[type="submit"]');
+    button.textContent = "Create family reports";
+    button.dataset.label = "Create family reports";
+    familyReviewPanel.querySelector('input[name="reviewName"]')?.focus();
+  };
+  const showFamilyResult = (result) => {
+    document.querySelector("#view").innerHTML = `<div class="page">
+      ${pageHeader("Family reports created", "All detected family members have been created as separate reports.")}
+      <section class="panel"><div class="panel-header"><div><h2>Family report</h2><span class="muted small">${esc(result.familyReports.length)} member reports created.</span></div><a class="button primary" href="${esc(result.familyPdfUrl)}" target="_blank" rel="noopener">Download single family PDF</a></div>
+      <div class="table-wrap"><table><thead><tr><th>Family member</th><th>PAN</th><th></th></tr></thead><tbody>${result.familyReports.map((report) => `<tr><td>${esc(report.clientName)}</td><td>${esc(report.pan || "—")}</td><td><a class="link" href="#/reports/${report.reportId}">Open member report →</a></td></tr>`).join("")}</tbody></table></div></section>
+      <p style="margin-top:18px"><a class="button secondary" href="#/upload">Upload another CAS</a></p>
+    </div>`;
+  };
   document.querySelector("#uploadForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = event.currentTarget.querySelector('button[type="submit"]');
     buttonBusy(button, true, "Reading and analysing CAS…");
     try {
+      collectFamilyReview();
       const result = await api("/api/cas/upload", { method: "POST", body: new FormData(event.currentTarget) });
+      if (result.familyReviewRequired) {
+        showFamilyReview(result.familyMembers || []);
+        notify("Family members found. Please review names before creating reports.");
+        buttonBusy(button, false);
+        return;
+      }
       if (result.familyReports?.length) {
         notify(`Family CAS processed: ${result.familyReports.length} reports created.`);
+        showFamilyResult(result);
+        return;
       } else {
         notify(`CAS processed using the ${result.source} adapter.`);
       }
