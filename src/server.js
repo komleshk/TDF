@@ -17,7 +17,7 @@ import { streamFamilyPdfReport, streamPdfReport, writeExcelReport } from "./repo
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot;
 const config = loadEnv();
-const appRevision = "cams-family-v11";
+const appRevision = "cams-family-v12";
 initDb(config);
 
 const brandingPath = path.join(config.storagePath, "branding");
@@ -122,6 +122,67 @@ function validRiskProfile(value) {
 
 function normalizedPersonName(value) {
   return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function normalizedMatchText(value) {
+  return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function parseFamilyMappings(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [left, right] = line.split(/\s*(?:=>|->|=)\s*/, 2);
+      if (!left || !right) return null;
+      const [name, pan] = right.split("|").map((part) => String(part || "").trim());
+      return {
+        match: left.trim(),
+        matchKey: normalizedMatchText(left),
+        name,
+        pan: String(pan || "").trim().toUpperCase(),
+      };
+    })
+    .filter((mapping) => mapping?.matchKey && mapping.name);
+}
+
+function mappingForHolding(holding, mappings) {
+  const searchable = normalizedMatchText([
+    holding.folio,
+    holding.schemeName,
+    holding.amc,
+    holding.investor?.name,
+    holding.investor?.pan,
+  ].filter(Boolean).join(" "));
+  return mappings.find((mapping) => searchable.includes(mapping.matchKey));
+}
+
+function accountGroupsFromHoldings(holdings, mappings) {
+  const groups = new Map();
+  const unmapped = [];
+  holdings.forEach((holding, index) => {
+    const mapping = mappingForHolding(holding, mappings);
+    const sourceInvestor = holding.investor || {};
+    const investor = {
+      ...sourceInvestor,
+      name: mapping?.name || sourceInvestor.name || "",
+      pan: mapping?.pan || sourceInvestor.pan || "",
+    };
+    if (!investor.name && !investor.pan) {
+      unmapped.push(`${holding.folio || "No folio"} · ${holding.schemeName || `Holding ${index + 1}`}`);
+      return;
+    }
+    const key = normalizedPersonName(investor.name) || (investor.pan ? `pan:${investor.pan}` : `holding-${index + 1}`);
+    if (!groups.has(key)) {
+      groups.set(key, { investor, statementDate: null, holdings: [], warnings: [] });
+    }
+    const grouped = groups.get(key);
+    grouped.holdings.push({ ...holding, investor });
+    if (!grouped.investor.pan && investor.pan) grouped.investor.pan = investor.pan;
+    if (!grouped.investor.name && investor.name) grouped.investor.name = investor.name;
+  });
+  return { accounts: [...groups.values()], unmapped };
 }
 
 function publicAppConfig() {
@@ -348,17 +409,26 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
     };
 
     if (request.body.familyMode === "1") {
-      const accounts = (parsed.accounts || []).filter((account) => account.holdings?.length);
-      if (accounts.length < 2) {
-        return response.status(422).json({ error: "Family mode is on, but the CAS did not expose more than one investor clearly. Upload individual CAS files or use normal upload for this file." });
+      const mappings = parseFamilyMappings(request.body.familyMappings);
+      const sourceHoldings = parsed.accounts?.length
+        ? parsed.accounts.flatMap((account) => (account.holdings || []).map((holding) => ({ ...holding, investor: account.investor || holding.investor || null })))
+        : parsed.holdings;
+      const groupedFamily = accountGroupsFromHoldings(sourceHoldings, mappings);
+      if (groupedFamily.unmapped.length) {
+        return response.status(422).json({
+          error: `Some holdings could not be mapped to a family member. Add manual mapping lines for: ${groupedFamily.unmapped.slice(0, 5).join("; ")}`,
+        });
       }
-      const familyName = String(request.body.newClientName || "").trim();
+      const accounts = groupedFamily.accounts.filter((account) => account.holdings?.length);
+      if (accounts.length < 2) {
+        return response.status(422).json({ error: "Family mode needs at least two mapped family members. Add manual mapping lines or use normal upload for this file." });
+      }
       const riskProfile = String(request.body.newClientRiskProfile || "Moderate");
       const familyBatchId = token(10);
       if (!validRiskProfile(riskProfile)) return response.status(400).json({ error: "Choose a valid risk profile." });
       const mergedAccounts = [...accounts.reduce((groups, account, index) => {
         const accountInvestor = account.investor || {};
-        const memberName = String(accountInvestor.name || (familyName ? `${familyName} - Member ${index + 1}` : "")).trim();
+        const memberName = String(accountInvestor.name || "").trim();
         const memberPan = String(accountInvestor.pan || "").trim().toUpperCase();
         const key = normalizedPersonName(memberName) || (memberPan ? `pan:${memberPan}` : `member-${index + 1}`);
         if (!groups.has(key)) {
@@ -379,10 +449,10 @@ app.post("/api/cas/upload", upload.single("cas"), async (request, response) => {
       const familyReports = transaction(() =>
         mergedAccounts.map((account, index) => {
           const accountInvestor = account.investor || {};
-          const memberName = String(accountInvestor.name || (familyName ? `${familyName} - Member ${index + 1}` : "")).trim();
+          const memberName = String(accountInvestor.name || accountInvestor.pan || "").trim();
           const memberPan = String(accountInvestor.pan || "").trim().toUpperCase();
           if (memberName.length < 2) {
-            const error = new Error("Family CAS found a member without a readable name. Enter a family name/prefix and upload again, or upload that member separately.");
+            const error = new Error("Family CAS found a member without a readable name. Add a manual mapping line for that folio/scheme and upload again.");
             error.status = 400;
             throw error;
           }

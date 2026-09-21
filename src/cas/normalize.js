@@ -51,6 +51,7 @@ export function normalizeHolding(raw, index = 0) {
     units,
     nav: amount(raw.nav) || (units ? currentValue / units : 0),
     absoluteGain: currentValue - costValue,
+    investor: raw.investor || null,
     transactions: Array.isArray(raw.transactions) ? raw.transactions : [],
     sip: raw.sip || null,
     stp: raw.stp || null,

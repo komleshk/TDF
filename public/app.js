@@ -299,6 +299,7 @@ async function uploadPage(query = "") {
       <section class="panel"><div class="panel-body form-stack">
         <label class="field"><span>Who is this CAS for? *</span><select name="clientId" id="uploadClient" required><option value="">Select an option</option><option value="__new__" ${selectedClient ? "" : "selected"}>＋ Create a new client from this CAS</option>${clients.map((client) => `<option value="${client.id}" ${String(client.id) === selectedClient ? "selected" : ""}>${esc(client.name)}${client.pan ? ` · ${esc(client.pan)}` : ""}</option>`).join("")}</select></label>
         <label class="check-row"><input type="checkbox" name="familyMode" value="1" id="familyMode" /><span><strong>Family CAS</strong><small>Create separate reports for each family member detected in this CAS.</small></span></label>
+        <label class="field hidden" id="familyMappingField"><span>Manual family mapping <small>(optional, one per line)</small></span><textarea name="familyMappings" placeholder="Example: 4009282/57 = Ram Singh Ratkuria | ACRPR3698E&#10;Or: Bandhan Large & Mid Cap = Ram Singh Ratkuria"></textarea><small>Use this when a folio or scheme is mapped to the wrong family member. Left side can be folio, PAN/code, or part of scheme name.</small></label>
         <div class="form-grid" id="newClientFields">
           <label class="field"><span>New client name *</span><input name="newClientName" minlength="2" placeholder="Type client name if creating a new client" /></label>
           <label class="field"><span>PAN <small>(optional override)</small></span><input name="newClientPan" maxlength="10" autocapitalize="characters" placeholder="Read from CAS when available" /></label>
@@ -331,11 +332,13 @@ async function uploadPage(query = "") {
   const newClientFields = document.querySelector("#newClientFields");
   const newClientName = document.querySelector('input[name="newClientName"]');
   const familyMode = document.querySelector("#familyMode");
+  const familyMappingField = document.querySelector("#familyMappingField");
   const syncClientMode = () => {
     if (familyMode.checked) clientSelect.value = "__new__";
     const isNew = clientSelect.value === "__new__";
     newClientFields.classList.toggle("hidden", !isNew);
-    newClientName.required = isNew;
+    familyMappingField.classList.toggle("hidden", !familyMode.checked);
+    newClientName.required = isNew && !familyMode.checked;
     clientSelect.disabled = familyMode.checked;
   };
   clientSelect.addEventListener("change", syncClientMode);

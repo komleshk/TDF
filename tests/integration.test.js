@@ -292,6 +292,42 @@ test("family CAS upload creates separate client reports", async () => {
   assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
 });
 
+test("family CAS manual mappings assign unmapped holdings without invented names", async () => {
+  const holdings = [
+    {
+      folio: "777777/01",
+      amc: "HDFC Mutual Fund",
+      schemeName: "HDFC Flexi Cap Fund Growth",
+      currentValue: 100000,
+      costValue: 90000,
+      units: 1000,
+      transactions: [{ date: "2024-01-01", amount: -90000 }],
+    },
+    {
+      folio: "888888/02",
+      amc: "SBI Mutual Fund",
+      schemeName: "SBI Gold Fund Growth",
+      currentValue: 50000,
+      costValue: 45000,
+      units: 500,
+      transactions: [{ date: "2024-02-01", amount: -45000 }],
+    },
+  ];
+  const form = new FormData();
+  form.set("familyMode", "1");
+  form.set("newClientRiskProfile", "Moderate");
+  form.set("familyMappings", "777777/01 = Manual One | MANUL1234A\nSBI Gold Fund = Manual Two | MANUL5678B");
+  form.set("password", "secret123");
+  form.set("cas", new Blob([await createPdf({ investor: { name: "", pan: "" }, holdings })], { type: "application/pdf" }), "manual-family-cas.pdf");
+
+  const response = await request("/api/cas/upload", { method: "POST", body: form });
+  const payload = await response.json();
+  assert.equal(response.status, 201, payload.error);
+  assert.equal(payload.familyReports.length, 2);
+  assert.equal(payload.familyReports[0].clientName, "Manual One");
+  assert.equal(payload.familyReports[1].clientName, "Manual Two");
+});
+
 test("new client CAS upload gives clear instruction when client name is missing", async () => {
   const form = new FormData();
   form.set("clientId", "__new__");
